@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 
-const migrations = [new URL('../../migrations/001_initial.sql', import.meta.url)];
+const migrations = [
+  new URL('../../migrations/001_initial.sql', import.meta.url),
+  new URL('../../migrations/002_letterboxd_rating_date.sql', import.meta.url),
+  new URL('../../migrations/003_tmdb_metadata.sql', import.meta.url),
+];
 
 // Run explicitly via db:init; opening a connection never changes the schema.
 export function migrateDatabase(database: Database.Database): number {
