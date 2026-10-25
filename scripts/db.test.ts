@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
 function run(source: string, databasePath: string) {
@@ -55,8 +55,14 @@ test('CLI fails cleanly when database directory cannot be created', () => {
 });
 
 test('relative database paths resolve from the project root', () => {
-  const result = run(`${databaseImport}
-    const db = openDatabase(); console.log(db.name); db.close();`, './data/movies.sqlite');
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), resolve('data/movies.sqlite'));
+  const directory = mkdtempSync(join(tmpdir(), 'movie-relative-'));
+  try {
+    const path = relative(process.cwd(), join(directory, 'test.sqlite'));
+    const result = run(`${databaseImport}
+      const db = openDatabase(); console.log(db.name); db.close();`, path);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), resolve(path));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

@@ -10,7 +10,14 @@ export function openDatabase() {
   }
   const databasePath = resolve(process.cwd(), configuredPath);
   mkdirSync(dirname(databasePath), { recursive: true });
-  return new Database(databasePath);
+  const database = new Database(databasePath);
+  try {
+    database.pragma('foreign_keys = ON');
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
 }
 
 export function checkDatabase() {
