@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+.env*
+!.env.example
+data/
+*.sqlite*
+*.db
+*.db-*
+*.csv
+*.zip
+*.bak
+backups/
+.DS_Store
+npm-debug.log*
