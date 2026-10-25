@@ -43,6 +43,7 @@ function year(value: unknown): number | null {
 export type Candidate = { id: number; title: string; original_title: string | null; year: number | null };
 function candidate(value: unknown): Candidate {
   const row = object(value);
+  if (row.media_type !== undefined && row.media_type !== 'movie') throw new TmdbError('TMDB returned a non-movie item.');
   return { id: id(row.id), title: title(row.title), original_title: string(row.original_title), year: year(row.release_date) };
 }
 export function normalizeTitle(value: string) {
@@ -77,9 +78,10 @@ export function parseDetails(value: unknown) {
 }
 export type Details = ReturnType<typeof parseDetails>;
 
-type Dependencies = { fetch?: typeof fetch; sleep?: (ms: number) => Promise<unknown>; now?: () => number; timeoutMs?: number };
+type Dependencies = { fetch?: typeof fetch; sleep?: (ms: number) => Promise<unknown>; now?: () => number; timeoutMs?: number; maxRequests?: number };
 export function createTmdbClient(apiKey: string | undefined, dependencies: Dependencies = {}) {
   if (!apiKey?.trim()) throw new TmdbError('TMDB_API_KEY is not configured. Set it in the server environment.', true);
+  if (dependencies.maxRequests !== undefined && (!Number.isSafeInteger(dependencies.maxRequests) || dependencies.maxRequests < 1)) throw new TmdbError('Invalid TMDB request budget.', true);
   const requestFetch = dependencies.fetch ?? fetch;
   const sleep = dependencies.sleep ?? delay;
   const now = dependencies.now ?? Date.now;
@@ -89,6 +91,7 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
     const url = new URL(`https://api.themoviedb.org/3${path}`);
     url.search = new URLSearchParams({ ...params, api_key: apiKey!.trim(), language: 'en-US' }).toString();
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (stats.requests >= (dependencies.maxRequests ?? Infinity)) throw new TmdbError('TMDB request budget exhausted.', true);
       if (previousStart !== null) await sleep(Math.max(0, 250 - (now() - previousStart)));
       previousStart = now(); stats.requests++;
       const controller = new AbortController();
@@ -124,6 +127,12 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
   }
   return {
     stats,
+    async recommendations(movieId: number) {
+      id(movieId);
+      const body = object(await request(`/movie/${movieId}/recommendations`, { page: '1' }));
+      if (!Array.isArray(body.results) || body.results.length > 20) throw new TmdbError('Invalid TMDB recommendations response.');
+      return [...new Map(body.results.map(row => { const parsed = candidate(row); return [parsed.id, parsed] as const; })).values()];
+    },
     async search(title: string, releaseYear: number) {
       const results = new Map<number, Candidate>();
       for (let page = 1; page <= 5; page++) {

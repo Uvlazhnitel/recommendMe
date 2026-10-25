@@ -9,10 +9,14 @@
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "eslint .",
     "db:check": "tsx scripts/db-check.ts",
-    "test:db": "tsx --test scripts/db.test.ts scripts/schema.test.ts scripts/letterboxd.test.ts scripts/tmdb.test.ts scripts/foundation.test.ts",
+    "test:db": "tsx --test scripts/db.test.ts scripts/schema.test.ts scripts/letterboxd.test.ts scripts/tmdb.test.ts scripts/foundation.test.ts scripts/taste.test.ts scripts/candidates.test.ts scripts/recommendations.test.ts",
     "db:init": "tsx scripts/db-init.ts",
     "seed:letterboxd": "tsx scripts/seed-letterboxd.ts",
-    "tmdb:enrich": "tsx scripts/tmdb-enrich.ts"
+    "tmdb:enrich": "tsx scripts/tmdb-enrich.ts",
+    "taste:generate": "tsx scripts/taste-generate.ts",
+    "taste:show": "tsx scripts/taste-show.ts",
+    "candidates:generate": "tsx scripts/candidates-generate.ts",
+    "recommendations:rank": "tsx scripts/recommendations-rank.ts"
   },
   "dependencies": {
     "@next/env": "^16.4.3",

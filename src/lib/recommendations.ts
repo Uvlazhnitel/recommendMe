@@ -1,0 +1,57 @@
+import type Database from 'better-sqlite3';
+import { blockedReason, readCandidateHistory } from './candidate-context';
+import { buildRankingContext } from './recommendation-context';
+import { parseCandidateReport, validateRanking, type RankingDiagnostic } from './recommendation-schema';
+import { requestStructuredOutput, requireOpenAIConfig, type OpenAIOptions, type Usage } from './openai';
+import type { MovieCandidate } from './candidates';
+import type { Evidence } from './taste-schema';
+
+export type RankedRecommendation = { tmdb_id: number; title: string; year: number; why_fit: string; possible_mismatch: string;
+  evidence: (Evidence & { title: string; year: number | null })[] };
+function exclusion(movie: MovieCandidate, history: ReturnType<typeof readCandidateHistory>) {
+  if (movie.media_type !== 'movie') return 'not_movie';
+  if (!Number.isSafeInteger(movie.runtime) || movie.runtime < 60) return 'invalid_runtime';
+  return blockedReason({ id: movie.tmdb_id, title: movie.title, original_title: movie.original_title, year: movie.year }, history);
+}
+export async function rankRecommendations(db: Database.Database, candidateReport: unknown, options: OpenAIOptions & { live?: boolean } = {}) {
+  const parsed = parseCandidateReport(candidateReport), diagnostics: RankingDiagnostic[] = [...parsed.diagnostics];
+  const history = readCandidateHistory(db);
+  const candidates = parsed.candidates.filter(movie => {
+    const reason = exclusion(movie, history);
+    if (reason) diagnostics.push({ stage: 'input', tmdb_id: movie.tmdb_id, reason });
+    return !reason;
+  });
+  const result = { mode: options.live ? 'live' : 'dry-run', status: 'ok' as 'ok' | 'error', recommendations: [] as RankedRecommendation[], diagnostics,
+    errors: [] as string[], warnings: [...parsed.warnings], context: null as ReturnType<typeof buildRankingContext>['summary'] | null,
+    input_count: parsed.input_count, eligible_count: candidates.length,
+    readiness: { openai_key: Boolean(options.apiKey?.trim()), openai_model: Boolean(options.model?.trim()) },
+    statistics: { openai_requests: 0, tmdb_requests: 0, model: null as string | null, usage: null as Usage | null } };
+  if (!candidates.length) { result.status = 'error'; result.errors.push('No eligible candidates remain; no API call made.'); return result; }
+  const context = buildRankingContext(db, candidates);
+  result.context = context.summary; result.warnings.push(...context.warnings);
+  if (!options.live) return result;
+  requireOpenAIConfig(options.apiKey, options.model);
+  try {
+    result.statistics.openai_requests = 1;
+    const output = await requestStructuredOutput({ input: context.input, format: context.format, maxInputBytes: context.summary.max_input_bytes }, options);
+    result.statistics.model = output.model; result.statistics.usage = output.usage;
+    const checked = validateRanking(output.body, candidates, context.snapshot);
+    diagnostics.push(...checked.diagnostics);
+    // One new SQL snapshot supplies both exclusions and current evidence at return time.
+    const current = readCandidateHistory(db), currentById = new Map(current.map(row => [row.id, row]));
+    const allowed = new Map(candidates.map(row => [row.tmdb_id, row]));
+    for (const recommendation of checked.recommendations) {
+      const movie = allowed.get(recommendation.tmdb_id)!;
+      let reason = exclusion(movie, current);
+      if (!reason && recommendation.evidence.some(ref => currentById.get(ref.movie_id)?.rating_100 !== ref.rating_100)) reason = 'evidence_changed';
+      if (reason) { diagnostics.push({ stage: 'final', tmdb_id: movie.tmdb_id, reason }); continue; }
+      result.recommendations.push({ ...recommendation, title: movie.title, year: movie.year,
+        evidence: recommendation.evidence.map(ref => ({ ...ref, title: currentById.get(ref.movie_id)!.title, year: currentById.get(ref.movie_id)!.release_year })) });
+    }
+    if (!result.recommendations.length) { result.status = 'error'; result.errors.push('No valid recommendations remain after server validation. No fallback or automatic retry was made.'); }
+  } catch (error) {
+    result.status = 'error'; result.recommendations = [];
+    result.errors.push(error instanceof Error ? error.message : 'Recommendation ranking failed; no automatic retry was made.');
+  }
+  return result;
+}
