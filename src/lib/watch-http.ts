@@ -13,7 +13,7 @@ export function watchHandler(dependencies: { open?: typeof openDatabase; backup?
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'rating_100')) throw new WatchError('invalid_watch');
       input = validateWatchInput({ ...body, movie_id: Number(id), watched: true });
     } catch (error) {
-      return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_watch' }, 400);
+      return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_watch' }, error instanceof JsonInputError ? error.status : 400);
     }
     let db: ReturnType<typeof openDatabase> | undefined;
     try {

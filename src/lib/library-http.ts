@@ -4,7 +4,7 @@ import { LibraryError, localMovieId, parseLibraryQuery, ratingValue, readLibrary
 
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 function failure(error: unknown) {
-  if (error instanceof JsonInputError) return reply({ error: error.code }, 400);
+  if (error instanceof JsonInputError) return reply({ error: error.code }, error.status);
   if (error instanceof LibraryError) return reply({ error: error.code }, error.code === 'movie_not_found' ? 404 : error.code === 'movie_not_watched' ? 409 : 400);
   return reply({ error: 'library_unavailable', message: 'The local library could not complete the operation.' }, 500);
 }

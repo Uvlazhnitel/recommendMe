@@ -1,8 +1,26 @@
 export class JsonInputError extends Error {
-  constructor(public readonly code: string) { super(code); }
+  constructor(public readonly code: string, public readonly status = 400) { super(code); }
 }
-/** Bounded JSON body reader shared by the catalog and watch endpoints. */
+export function assertWriteOrigin(request: Request) {
+  const origin = request.headers.get('origin');
+  // NextURL normalizes loopback hostnames to localhost. Host retains the actual
+  // HTTP authority used by the browser; forwarded host/proto headers are ignored.
+  let target = new URL(request.url);
+  const host = request.headers.get('host');
+  if (host !== null) {
+    if (!host || /[\s/\\?#@]/.test(host)) throw new JsonInputError('forbidden_origin', 403);
+    try { target = new URL(`${target.protocol}//${host}`); }
+    catch { throw new JsonInputError('forbidden_origin', 403); }
+  }
+  const site = request.headers.get('sec-fetch-site')?.toLowerCase();
+  if (site === 'cross-site' || (origin !== null && (origin === 'null' || origin !== target.origin)) ||
+    (origin === null && site !== undefined && site !== 'same-origin' && site !== 'none')) {
+    throw new JsonInputError('forbidden_origin', 403);
+  }
+}
+/** Shared write boundary: Origin validation and a bounded JSON body. */
 export async function readJsonBody(request: Request): Promise<unknown> {
+  assertWriteOrigin(request);
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new JsonInputError('expected_json');
   const reader = request.body?.getReader();
   if (!reader) throw new JsonInputError('invalid_json');

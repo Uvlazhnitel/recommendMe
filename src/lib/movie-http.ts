@@ -46,7 +46,7 @@ export function movieHandlers(dependencies: { api?: () => CatalogApi; open?: typ
       let body: unknown;
       try {
         body = await readJsonBody(request);
-      } catch (error) { return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_json' }, 400); }
+      } catch (error) { return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_json' }, error instanceof JsonInputError ? error.status : 400); }
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 ||
         !('tmdb_id' in body) || !validTmdbId(body.tmdb_id)) return reply({ error: 'invalid_tmdb_id', message: 'Provide only a positive integer tmdb_id.' }, 400);
       let db: ReturnType<typeof openDatabase> | undefined;

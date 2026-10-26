@@ -1,0 +1,101 @@
+[
+  {
+    "tmdb_id": 335984,
+    "title": "Blade Runner 2049",
+    "year": 2017,
+    "runtime": 164,
+    "genres": [
+      {
+        "id": 878,
+        "name": "Science Fiction"
+      },
+      {
+        "id": 18,
+        "name": "Drama"
+      }
+    ],
+    "poster_path": "/gajva2L0rPYkEWjzgFlBXCAVBE5.jpg",
+    "backdrop_path": "/askFH4GSk2u9z3ZE5ypdKIMeqLJ.jpg",
+    "source": "https://www.themoviedb.org/movie/335984"
+  },
+  {
+    "tmdb_id": 152601,
+    "title": "Her",
+    "year": 2013,
+    "runtime": 126,
+    "genres": [
+      {
+        "id": 10749,
+        "name": "Romance"
+      },
+      {
+        "id": 878,
+        "name": "Science Fiction"
+      },
+      {
+        "id": 18,
+        "name": "Drama"
+      }
+    ],
+    "poster_path": "/eCOtqtfvn7mxGl6nfmq4b1exJRc.jpg",
+    "backdrop_path": "/1YnZchmaGc8dchgRPDpR1KGrixA.jpg",
+    "source": "https://www.themoviedb.org/movie/152601"
+  },
+  {
+    "tmdb_id": 120467,
+    "title": "The Grand Budapest Hotel",
+    "year": 2014,
+    "runtime": 100,
+    "genres": [
+      {
+        "id": 35,
+        "name": "Comedy"
+      },
+      {
+        "id": 18,
+        "name": "Drama"
+      }
+    ],
+    "poster_path": "/eWdyYQreja6JGCzqHWXpWHDrrPo.jpg",
+    "backdrop_path": "/jK65srQczOKTpW62wPxwwKztGgE.jpg",
+    "source": "https://www.themoviedb.org/movie/120467"
+  },
+  {
+    "tmdb_id": 329865,
+    "title": "Arrival",
+    "year": 2016,
+    "runtime": 116,
+    "genres": [
+      {
+        "id": 18,
+        "name": "Drama"
+      },
+      {
+        "id": 878,
+        "name": "Science Fiction"
+      },
+      {
+        "id": 9648,
+        "name": "Mystery"
+      }
+    ],
+    "poster_path": "/pEzNVQfdzYDzVK0XqxERIw2x2se.jpg",
+    "backdrop_path": "/8MUZz7oPXQftFTslZpRP3CVMOoq.jpg",
+    "source": "https://www.themoviedb.org/movie/329865"
+  },
+  {
+    "tmdb_id": 976893,
+    "title": "Perfect Days",
+    "year": 2023,
+    "runtime": 124,
+    "genres": [
+      {
+        "id": 18,
+        "name": "Drama"
+      }
+    ],
+    "poster_path": "/tvUHVSTJV9ITON3oyHaWp7oaAc8.jpg",
+    "backdrop_path": "/7WBIaphEm09Z8WFBo85kWGxYYkk.jpg",
+    "source": "https://www.themoviedb.org/movie/976893"
+  }
+]
