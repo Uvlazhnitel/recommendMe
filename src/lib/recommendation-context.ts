@@ -70,7 +70,7 @@ export function buildRankingContext(db: Database.Database, candidates: MovieCand
   return { context, input: input(), format, snapshot: context.current_evidence.map(({ movie_id, rating_100 }) => ({ movie_id, rating_100 })),
     warnings: stale ? ['Saved taste profile is stale; current evidence and all rating changes override old conclusions. No profile regeneration.'] : [],
     summary: { profile_version: personal.saved.profile_version, profile_status: stale ? 'stale' : 'current', ratings_count: personal.rated.length,
-      candidates: candidates.length, rating_changes: personal.changes.length, high_examples: Math.min(perGroup, high.length), low_examples: Math.min(perGroup, low.length),
+      candidates: candidates.length, rating_changes: personal.changes.length, profile_refresh: personal.profileRefresh, high_examples: Math.min(perGroup, high.length), low_examples: Math.min(perGroup, low.length),
       related_examples: context.related_examples.length, contrasts: context.contrasts.length, current_evidence: context.current_evidence.length,
       input_bytes: bytes(), max_input_bytes: maxBytes, candidate_overview_limit: candidateOverview, example_overview_limit: exampleOverview,
       estimated_input_tokens: Math.ceil(bytes() / 3), token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count.' } };

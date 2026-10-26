@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { RECOMMENDATION_REPEAT_DAYS } from './recommendation-policy';
 import { buildCandidateContext, blockedReason, CANDIDATE_FORMAT, CANDIDATE_LIMITS, readCandidateHistory } from './candidate-context';
 import { requestStructuredOutput, requireOpenAIConfig, type Usage } from './openai';
 import { createTmdbClient, matches, normalizeTitle, TmdbError, type Candidate, type Details } from './tmdb';
@@ -40,6 +41,8 @@ export async function generateCandidates(db: Database.Database, options: Options
       if (reason) { accepted.delete(id); diagnostics.push({ source: movie.source === 'tmdb' ? 'tmdb' : 'llm', title: movie.title, year: movie.year, tmdb_id: id, reason }); }
     }
     const candidates = [...accepted.values()].slice(0, CANDIDATE_LIMITS.results);
+    const recent = diagnostics.filter(row => row.reason === 'recently_recommended').length;
+    if (recent) warnings.push(`${recent} recently recommended candidates excluded for ${RECOMMENDATION_REPEAT_DAYS} days. No automatic cooldown relaxation.`);
     if (accepted.size > CANDIDATE_LIMITS.results) warnings.push('Verified candidate list capped at 40 in source order; no final ranking was performed.');
     return { mode: 'live' as const, status: errors.length ? (candidates.length ? 'partial' : 'error') : 'ok', candidates,
       rejected_by_reason: diagnostics.reduce<Record<string, number>>((counts, item) => { counts[item.reason] = (counts[item.reason] ?? 0) + 1; return counts; }, {}),

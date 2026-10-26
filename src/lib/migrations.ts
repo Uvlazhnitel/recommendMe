@@ -5,6 +5,7 @@ const migrations = [
   new URL('../../migrations/001_initial.sql', import.meta.url),
   new URL('../../migrations/002_letterboxd_rating_date.sql', import.meta.url),
   new URL('../../migrations/003_tmdb_metadata.sql', import.meta.url),
+  new URL('../../migrations/004_recommendation_memory.sql', import.meta.url),
 ];
 
 // Run explicitly via db:init; opening a connection never changes the schema.

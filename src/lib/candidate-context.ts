@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3';
 import { buildTasteContext } from './taste-context';
 import { readTasteProfile } from './taste-profile';
 import { normalizeTitle } from './tmdb';
+import { recentlyRecommended } from './recommendation-policy';
+import { describeTasteRefresh } from './taste-refresh';
 
 export const CANDIDATE_LIMITS = { llm: 30, tmdb: 25, seeds: 5, details: 55, results: 40, tmdb_requests: 120, input_bytes: 120000 } as const;
 export const CANDIDATE_FORMAT = { type: 'json_schema', name: 'movie_candidates', strict: true, schema: {
@@ -16,13 +18,14 @@ Consider cross-genre positive and negative patterns, counterexamples and uncerta
 Only suggest movies, never TV or shorts; feature length means at least 60 minutes. Avoid watched and hidden films in the optional exclusions. Titles and years are hypotheses the server will verify. Do not supply IDs, URLs, scores, final ranking, recommendation explanations or probabilities.`;
 export type HistoryRow = { id: number; title: string; release_year: number | null; tmdb_id: number | null; tmdb_title: string | null;
   original_title: string | null; tmdb_release_year: number | null; media_type: string; runtime_minutes: number | null; genres_json: string | null;
-  directors_json: string | null; watched: number | null; not_interested: number | null; rating_100: number | null };
+  directors_json: string | null; watched: number | null; not_interested: number | null; rating_100: number | null; last_recommended_at: string | null };
 export function readCandidateHistory(db: Database.Database): HistoryRow[] {
   return db.prepare(`SELECT m.id,m.title,m.release_year,m.tmdb_id,m.tmdb_title,m.original_title,m.tmdb_release_year,m.media_type,
-    m.runtime_minutes,m.genres_json,m.directors_json,u.watched,u.not_interested,u.rating_100 FROM movies m
+    m.runtime_minutes,m.genres_json,m.directors_json,u.watched,u.not_interested,u.rating_100,
+    (SELECT max(r.recommended_at) FROM recommendations r WHERE r.movie_id=m.id) last_recommended_at FROM movies m
     LEFT JOIN user_movies u ON u.movie_id=m.id ORDER BY m.id`).all() as HistoryRow[];
 }
-export function blockedReason(movie: { id: number; title: string; original_title: string | null; year: number | null }, history: HistoryRow[]) {
+export function blockedReason(movie: { id: number; title: string; original_title: string | null; year: number | null }, history: HistoryRow[], now = Date.now()) {
   const titles = [movie.title, movie.original_title].filter((title): title is string => title !== null).map(normalizeTitle);
   for (const row of history) {
     if (!row.watched && !row.not_interested) continue;
@@ -33,6 +36,16 @@ export function blockedReason(movie: { id: number; title: string; original_title
     const year = row.release_year ?? row.tmdb_release_year;
     if (year === null || movie.year === null) return 'uncertain_history_match';
     if (year === movie.year) return row.watched ? 'watched_without_tmdb_id' : 'not_interested';
+  }
+  for (const row of history) {
+    if (!recentlyRecommended(row.last_recommended_at, now)) continue;
+    if (row.tmdb_id === movie.id) return 'recently_recommended';
+    if (row.tmdb_id !== null) continue;
+    const names = [row.title, row.tmdb_title, row.original_title].filter((name): name is string => name !== null).map(normalizeTitle);
+    if (!names.some(name => titles.includes(name))) continue;
+    const year = row.release_year ?? row.tmdb_release_year;
+    if (year === null || movie.year === null) return 'uncertain_history_match';
+    if (year === movie.year) return 'recently_recommended';
   }
   return null;
 }
@@ -69,12 +82,13 @@ export function prepareTasteInputs(db: Database.Database) {
     const row = byId.get(item.movie_id)!;
     return row.rating_100! >= 80 || row.rating_100! <= 60 ? [{ ...item, title: row.title, year: row.release_year, rating_100: row.rating_100! }] : [];
   });
-  return { saved, history, byId, rated, taste, changes, profile, evidenceMovies, examples };
+  const profileRefresh = describeTasteRefresh(changes, taste?.fingerprint === saved.context_fingerprint);
+  return { saved, history, byId, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh };
 }
 export function buildCandidateContext(db: Database.Database, maxBytes: number = CANDIDATE_LIMITS.input_bytes) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid candidate input byte limit.');
-  const { saved, history, rated, taste, changes, profile, evidenceMovies, examples } = prepareTasteInputs(db);
-  const exclusions = history.filter(row => row.watched || row.not_interested).map(row => ({ title: row.title, year: row.release_year }));
+  const { saved, history, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh } = prepareTasteInputs(db);
+  const exclusions = history.filter(row => row.watched || row.not_interested || recentlyRecommended(row.last_recommended_at)).map(row => ({ title: row.title, year: row.release_year }));
   let descriptionLimit = 600, perGroup = 10, pairs = 6, includeExclusions = true;
   const make = () => ({ profile, profile_evidence_movies: evidenceMovies, rating_changes: changes,
     examples: [examples.filter(row => row.rating_100 >= 80), examples.filter(row => row.rating_100 <= 60)].flatMap(group => group.slice(0, perGroup).map(row => ({ ...row, overview: descriptionLimit && row.overview ? [...row.overview].slice(0, descriptionLimit).join('') : null }))),
@@ -93,7 +107,7 @@ export function buildCandidateContext(db: Database.Database, maxBytes: number = 
   const stale = taste?.fingerprint !== saved.context_fingerprint;
   return { input: input(), context, seeds: selectSeeds(history), history, summary: { profile_version: saved.profile_version,
     profile_status: stale ? 'stale' : 'current', ratings_count: rated.length, rating_changes: changes.length, examples: context.examples.length,
-    contrasts: context.contrasts.length, input_bytes: size(), estimated_input_tokens: Math.ceil(size() / 3),
+    contrasts: context.contrasts.length, profile_refresh: profileRefresh, input_bytes: size(), estimated_input_tokens: Math.ceil(size() / 3),
     token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count.', limits: CANDIDATE_LIMITS },
     warnings: stale ? ['Saved taste profile is stale; current examples and all rating changes override older evidence. No profile regeneration.'] : [] };
 }

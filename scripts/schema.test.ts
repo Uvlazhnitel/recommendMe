@@ -34,7 +34,7 @@ test('fresh schema has four STRICT tables; reinitialization preserves rows and v
   try {
     assert.equal(db.pragma('foreign_keys', { simple: true }), 1);
     assert.equal(db.pragma('user_version', { simple: true }), 0);
-    assert.equal(migrateDatabase(db), 3);
+    assert.equal(migrateDatabase(db), 4);
     const tables = db.prepare("SELECT name, strict FROM pragma_table_list WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all();
     assert.deepEqual(tables, ['movies', 'recommendations', 'taste_profile', 'user_movies'].map(name => ({ name, strict: 1 })));
     db.prepare('INSERT INTO movies (title, release_year) VALUES (?, ?)').run('Фильм', 2000);
@@ -42,7 +42,7 @@ test('fresh schema has four STRICT tables; reinitialization preserves rows and v
     db.exec('INSERT INTO recommendations (movie_id) VALUES (1)');
     db.prepare('INSERT INTO taste_profile (profile_json) VALUES (?)').run('{"preferences":[]}');
     const before = db.serialize();
-    assert.equal(migrateDatabase(db), 3);
+    assert.equal(migrateDatabase(db), 4);
     assert.deepEqual(db.serialize(), before);
   } finally { cleanup(); }
 });

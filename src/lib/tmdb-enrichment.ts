@@ -15,7 +15,7 @@ const json = (value: unknown) => value === null ? null : JSON.stringify(value);
 export async function enrichTmdb(database: Database.Database, client: TmdbClient, options: Options = {}): Promise<EnrichmentReport> {
   if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit <= 0)) throw new Error('limit must be a positive integer.');
   const version = database.pragma('user_version', { simple: true }) as number;
-  if (version < 2 || version > 3) throw new Error('TMDB enrichment requires schema version 2 or 3.');
+  if (version < 2 || version > 4) throw new Error('TMDB enrichment requires schema version 2, 3 or 4.');
   if (!options.dryRun) {
     if (!options.backupPath) throw new Error('A backup path is required before enrichment.');
     await database.backup(options.backupPath);

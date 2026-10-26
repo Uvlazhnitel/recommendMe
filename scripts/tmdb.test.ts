@@ -108,13 +108,15 @@ test('network errors are sanitized; timeouts abort and retry three times', async
 test('successful enrichment migrates version 2, preserves source and personal data, resumes without requests', async () => {
   const f = fixture(true);
   try {
-    const before = ['user_movies', 'recommendations', 'taste_profile'].map(table => f.db.prepare(`SELECT * FROM ${table}`).all());
+    const preserved = () => ['user_movies', 'recommendations', 'taste_profile'].map(table => f.db.prepare(table === 'recommendations'
+      ? 'SELECT id,movie_id,recommended_at,why_fit,possible_mismatch,rejected FROM recommendations' : `SELECT * FROM ${table}`).all());
+    const before = preserved();
     const original = f.db.prepare('SELECT title,release_year,letterboxd_uri FROM movies').all();
     const progress: number[] = [];
     const result = await enrichTmdb(f.db, happy().api, { ...f.options(), onProgress: report => progress.push(report.processed) });
     assert.equal(result.matched, 1); assert.deepEqual(progress, [0, 1]); assert.equal(result.remainingWithoutId, 0);
-    assert.equal(f.db.pragma('user_version', { simple: true }), 3);
-    assert.deepEqual(['user_movies', 'recommendations', 'taste_profile'].map(table => f.db.prepare(`SELECT * FROM ${table}`).all()), before);
+    assert.equal(f.db.pragma('user_version', { simple: true }), 4);
+    assert.deepEqual(preserved(), before);
     assert.deepEqual(f.db.prepare('SELECT title,release_year,letterboxd_uri FROM movies').all(), original);
     const row = f.db.prepare('SELECT tmdb_title,original_title,tmdb_release_year,runtime_minutes,tmdb_enrichment_status FROM movies').get();
     assert.deepEqual(row, { tmdb_title: 'Test', original_title: 'Test', tmdb_release_year: 2000, runtime_minutes: 50, tmdb_enrichment_status: 'matched' });
