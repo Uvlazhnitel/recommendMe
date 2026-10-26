@@ -33,7 +33,7 @@ export async function addCatalogMovie(db: Database.Database, api: Pick<CatalogAp
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}): Promise<CatalogResult> {
   if (!validTmdbId(tmdbId)) throw new Error('Invalid TMDB ID.');
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4) throw new Error('Catalog requires SQLite schema 3 or 4. Run db:init.');
+  if (version !== 3 && version !== 4 && version !== 5) throw new Error('Catalog requires SQLite schema 3, 4 or 5. Run db:init.');
   const found = existing(db, tmdbId);
   if (found) return found;
   const details = await api.details(tmdbId);
@@ -53,11 +53,11 @@ export async function addCatalogMovie(db: Database.Database, api: Pick<CatalogAp
     const result = db.prepare(`INSERT INTO movies
       (tmdb_id,title,release_year,media_type,runtime_minutes,overview,genres_json,poster_path,
        tmdb_vote_count,tmdb_popularity,metadata_updated_at,tmdb_title,original_title,tmdb_release_year,
-       original_language,tmdb_vote_average,directors_json,credits_json,tmdb_enrichment_status,tmdb_attempted_at)
-      VALUES (?,?,?,'movie',?,?,?,?,?,?,?,?,?,?,?,?,?,?,'matched',?)`).run(
+       original_language,tmdb_vote_average,directors_json,credits_json,tmdb_enrichment_status,tmdb_attempted_at,backdrop_path)
+      VALUES (?,?,?,'movie',?,?,?,?,?,?,?,?,?,?,?,?,?,?,'matched',?,?)`).run(
       details.id, details.title, details.year, details.runtime, details.overview, json(details.genres), details.poster_path,
       details.vote_count, details.popularity, now, details.title, details.original_title, details.year,
-      details.original_language, details.vote_average, json(details.directors), json(details.credits), now);
+      details.original_language, details.vote_average, json(details.directors), json(details.credits), now, details.backdrop_path);
     return { status: 'created', movie_id: Number(result.lastInsertRowid), tmdb_id: tmdbId };
   }).immediate();
 }

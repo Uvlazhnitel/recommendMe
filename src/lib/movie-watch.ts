@@ -38,7 +38,7 @@ export async function confirmMovieWatch(db: Database.Database, value: unknown,
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}): Promise<WatchResult> {
   const input = validateWatchInput(value);
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4) throw new Error('Watch writes require schema 3 or 4.');
+  if (version !== 3 && version !== 4 && version !== 5) throw new Error('Watch writes require schema 3, 4 or 5.');
   const before = current(db, input);
   const stable = unchanged(input, before);
   if (stable) return stable;

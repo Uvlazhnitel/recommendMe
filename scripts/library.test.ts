@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 import { LibraryError, parseLibraryQuery, readLibrary, readLibraryMovie, updateLibraryRating } from '../src/lib/library';
 import { libraryHandlers } from '../src/lib/library-http';
 import { buildTasteContext } from '../src/lib/taste-context';
@@ -157,7 +157,7 @@ test('backup failure prevents writes/migration; successful 3→4 backup can rest
   const f = fixture(3); try {
     const before = all(f.db); await assert.rejects(updateLibraryRating(f.db, 2, 85, { backup: async () => { throw Error('Backup failure'); } }));
     assert.equal(all(f.db), before); assert.equal(f.db.pragma('user_version', { simple: true }), 3);
-    await updateLibraryRating(f.db, 2, 85); assert.equal(f.db.pragma('user_version', { simple: true }), 4);
+    await updateLibraryRating(f.db, 2, 85); assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     const backup = new Database(join(f.folder, 'backups', readdirSync(join(f.folder, 'backups'))[0]), { readonly: true });
     assert.equal(backup.pragma('user_version', { simple: true }), 3); assert.equal(all(backup), before); backup.close();
     f.db.close(); const reopened = new Database(f.path, { readonly: true }); assert.equal(readLibraryMovie(reopened, 2).rating_100, 85); reopened.close();
@@ -168,7 +168,7 @@ test('SQL failure rolls back both score/source and timestamps; unknown schemas a
   const f = fixture(); try {
     f.db.exec("CREATE TRIGGER fail_rating AFTER UPDATE OF rating_100 ON user_movies BEGIN SELECT RAISE(ABORT,'Synthetic SQL failure'); END;");
     const before = all(f.db); await assert.rejects(updateLibraryRating(f.db, 2, 85)); assert.equal(all(f.db), before);
-    f.db.pragma('user_version=5'); await assert.rejects(updateLibraryRating(f.db, 2, 85), /schema/);
+    f.db.pragma(`user_version=${SCHEMA_VERSION + 1}`); await assert.rejects(updateLibraryRating(f.db, 2, 85), /schema/);
     assert.throws(() => readLibrary(f.db), /schema/); assert.throws(() => readLibraryMovie(f.db, 2), /schema/);
   } finally { f.close(); }
 });

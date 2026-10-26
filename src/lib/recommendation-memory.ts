@@ -99,10 +99,13 @@ export function recordRecommendations(db: Database.Database, candidateReport: un
       let movieId = (db.prepare('SELECT id FROM movies WHERE tmdb_id=?').get(movie.tmdb_id) as { id: number } | undefined)?.id;
       if (movieId === undefined) {
         const inserted = db.prepare(`INSERT INTO movies(tmdb_id,title,release_year,media_type,runtime_minutes,overview,genres_json,tmdb_vote_count,tmdb_popularity,
-          tmdb_title,original_title,tmdb_release_year,directors_json,tmdb_enrichment_status,metadata_updated_at)
-          VALUES(?,?,?,'movie',?,?,?,?,?,?,?,?,?,'matched',?)`).run(movie.tmdb_id,movie.title,movie.year,movie.runtime,movie.overview,JSON.stringify(movie.genres),
-          movie.vote_count,movie.popularity,movie.title,movie.original_title,movie.year,movie.directors === null ? null : JSON.stringify(movie.directors),new Date(now).toISOString());
+          tmdb_title,original_title,tmdb_release_year,directors_json,tmdb_enrichment_status,metadata_updated_at,poster_path,backdrop_path)
+          VALUES(?,?,?,'movie',?,?,?,?,?,?,?,?,?,'matched',?,?,?)`).run(movie.tmdb_id,movie.title,movie.year,movie.runtime,movie.overview,JSON.stringify(movie.genres),
+          movie.vote_count,movie.popularity,movie.title,movie.original_title,movie.year,movie.directors === null ? null : JSON.stringify(movie.directors),new Date(now).toISOString(),movie.poster_path ?? null,movie.backdrop_path ?? null);
         movieId = Number(inserted.lastInsertRowid);
+      } else if (movie.poster_path || movie.backdrop_path) {
+        db.prepare('UPDATE movies SET poster_path=coalesce(poster_path,?),backdrop_path=coalesce(backdrop_path,?) WHERE id=?')
+          .run(movie.poster_path ?? null,movie.backdrop_path ?? null,movieId);
       }
       db.prepare('INSERT INTO recommendations(movie_id,recommended_at,why_fit,possible_mismatch,result_id) VALUES(?,?,?,?,?)')
         .run(movieId,recommendedAt,row.why_fit,row.possible_mismatch,resultId);

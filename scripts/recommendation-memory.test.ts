@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { test } from 'node:test';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 import { buildTasteContext } from '../src/lib/taste-context';
 import { prepareTasteInputs, readCandidateHistory, blockedReason } from '../src/lib/candidate-context';
 import { recordRecommendations, recommendationHistory, rejectRecommendation } from '../src/lib/recommendation-memory';
@@ -50,7 +50,7 @@ const snapshot=(db:Database.Database)=>['movies','user_movies','recommendations'
 test('migration 3→4 preserves existing rows; legacy history is readable and the new key is unique',()=>{
   const f=fixture(3);
   try{f.db.exec('INSERT INTO recommendations(movie_id) VALUES(1)');const old=recommendationHistory(f.db);assert.equal(old.length,1);
-    const before=personal(f.db);assert.equal(migrateDatabase(f.db),4);assert.deepEqual(personal(f.db),before);assert.deepEqual(recommendationHistory(f.db),old);
+    const before=personal(f.db);assert.equal(migrateDatabase(f.db), SCHEMA_VERSION);assert.deepEqual(personal(f.db),before);assert.deepEqual(recommendationHistory(f.db),old);
     assert.equal((f.db.prepare('SELECT result_id FROM recommendations').get() as {result_id:null}).result_id,null);
     f.db.exec("INSERT INTO recommendations(movie_id,result_id) VALUES(1,'one')");assert.throws(()=>f.db.exec("INSERT INTO recommendations(movie_id,result_id) VALUES(1,'one')"));
     const stable=f.db.serialize();migrateDatabase(f.db);assert.deepEqual(f.db.serialize(),stable);

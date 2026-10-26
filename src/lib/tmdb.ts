@@ -67,7 +67,7 @@ export function parseDetails(value: unknown) {
   const runtime = number(row.runtime, true);
   return { ...identity, overview: string(row.overview),
     genres: array(row.genres)?.map(value => { const genre = object(value); return { id: id(genre.id), name: title(genre.name) }; }) ?? null,
-    runtime: runtime === 0 ? null : runtime, poster_path: string(row.poster_path), original_language: string(row.original_language),
+    runtime: runtime === 0 ? null : runtime, poster_path: string(row.poster_path), backdrop_path: string(row.backdrop_path), original_language: string(row.original_language),
     vote_average: number(row.vote_average, false, 0, 10), vote_count: number(row.vote_count, true), popularity: number(row.popularity),
     directors: crew?.filter(value => value.job === 'Director').map(({ id, name }) => ({ id, name })) ?? null,
     credits: credits ? {

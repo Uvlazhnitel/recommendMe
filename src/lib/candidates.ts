@@ -6,7 +6,8 @@ import { createTmdbClient, matches, normalizeTitle, TmdbError, type Candidate, t
 
 export type MovieCandidate = { tmdb_id: number; media_type: 'movie'; title: string; original_title: string | null; year: number; overview: string;
   genres: { id: number; name: string }[]; runtime: number; directors: { id: number; name: string }[] | null;
-  vote_count: number | null; popularity: number | null; source: 'llm' | 'tmdb' | 'both' };
+  vote_count: number | null; popularity: number | null; source: 'llm' | 'tmdb' | 'both';
+  poster_path?: string | null; backdrop_path?: string | null };
 type Proposal = { title: string; year: number };
 type Source = 'llm' | 'tmdb';
 type Diagnostic = { source: Source; title: string; year: number | null; tmdb_id?: number; reason: string };
@@ -118,7 +119,8 @@ export async function generateCandidates(db: Database.Database, options: Options
     if (detail.year === null || !detail.overview || !detail.genres?.length) { diagnose(source, identity, 'insufficient_metadata'); return; }
     accepted.set(detail.id, { tmdb_id: detail.id, media_type: 'movie', title: detail.title, original_title: detail.original_title, year: detail.year,
       overview: detail.overview, genres: detail.genres, runtime: detail.runtime, directors: detail.directors,
-      vote_count: detail.vote_count, popularity: detail.popularity, source });
+      vote_count: detail.vote_count, popularity: detail.popularity, source,
+      ...(detail.poster_path ? { poster_path: detail.poster_path } : {}), ...(detail.backdrop_path ? { backdrop_path: detail.backdrop_path } : {}) });
   };
   const seen = new Set<string>();
   for (const proposal of proposals) {

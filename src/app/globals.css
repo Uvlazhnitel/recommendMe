@@ -236,3 +236,13 @@ fieldset { min-width: 0; border: 0; margin: 24px 0 0; padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+.recommendation-notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-5); color: var(--color-success); }
+.recommendation-notice p { flex: 1 1 240px; }
+.readiness-notice { max-width: 760px; margin-top: var(--space-5); color: var(--color-muted); }
+.paid-confirmation { width: min(520px, calc(100% - 40px)); max-height: calc(100dvh - 40px); padding: var(--space-6); color: var(--color-text); background: var(--color-surface); border: var(--border); border-radius: var(--radius-media); }
+.paid-confirmation::backdrop { background: #000b; }
+.paid-confirmation h2 { font-size: 26px; }
+.paid-confirmation p { margin-top: var(--space-4); color: var(--color-muted); }
+.paid-confirmation > div { margin-top: var(--space-5); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); }
+.paid-confirmation .button { min-height: 48px; }

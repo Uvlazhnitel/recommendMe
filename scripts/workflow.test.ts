@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 import { movieHandlers } from '../src/lib/movie-http';
 import { watchHandler } from '../src/lib/watch-http';
 import { libraryHandlers } from '../src/lib/library-http';
@@ -155,7 +155,7 @@ test('legacy conflict, external error, backup failure and SQL rollback never cor
     assert.ok(!unavailable.ok); assert.equal(snapshot(f.db), before);
     const failedBackup = rejectionHandler(false, { open: f.open, backup: { backup: async () => { throw Error('private backup path'); } } });
     const failure = await failedBackup(request({ tmdb_id: 103 })); assert.equal(failure.status, 500); assert.ok(!(await failure.text()).includes('private')); assert.equal(snapshot(f.db), before);
-    const reject = rejectionHandler(false, { open: f.open }); await reject(request({ tmdb_id: 103 })); assert.equal(f.db.pragma('user_version', { simple: true }), 4);
+    const reject = rejectionHandler(false, { open: f.open }); await reject(request({ tmdb_id: 103 })); assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     f.db.exec("INSERT INTO recommendations(movie_id,rejected) VALUES(3,0)");
     const repeated = await reject(request({ tmdb_id: 103 })); assert.equal((await repeated.json()).history_changes, 1);
     f.db.exec("INSERT INTO recommendations(movie_id,rejected) VALUES(2,0); CREATE TRIGGER fail_reject AFTER UPDATE ON recommendations WHEN NEW.movie_id=2 BEGIN SELECT RAISE(ABORT,'synthetic SQL failure'); END;");

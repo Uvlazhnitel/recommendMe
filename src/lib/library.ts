@@ -51,7 +51,7 @@ function summary(row: Row) {
 }
 function schema(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4) throw new Error('Library requires SQLite schema 3 or 4.');
+  if (version !== 3 && version !== 4 && version !== 5) throw new Error('Library requires SQLite schema 3, 4 or 5.');
 }
 export function readLibrary(db: Database.Database, params = new URLSearchParams()) {
   const query = parseLibraryQuery(params); schema(db);

@@ -5,8 +5,8 @@ import { MovieEditor } from './components/movie-editor';
 import { MoviePoster } from './components/movie-poster';
 import { Button, EmptyState, ErrorState, LoadingState } from './components/ui';
 
-export default function Workbench({ mode }: { mode: 'rate' | 'library' }) {
-  const m = useWorkbench(mode);
+export default function Workbench({ mode, initialMovieId }: { mode: 'rate' | 'library'; initialMovieId?: number }) {
+  const m = useWorkbench(mode, initialMovieId);
   return <div className="workbench">
     <div className="workbench-results">
       {mode === 'rate' ? <section aria-label="Поиск фильмов">

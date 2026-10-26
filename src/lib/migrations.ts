@@ -6,7 +6,10 @@ const migrations = [
   new URL('../../migrations/002_letterboxd_rating_date.sql', import.meta.url),
   new URL('../../migrations/003_tmdb_metadata.sql', import.meta.url),
   new URL('../../migrations/004_recommendation_memory.sql', import.meta.url),
+  new URL('../../migrations/005_movie_backdrop.sql', import.meta.url),
 ];
+
+export const SCHEMA_VERSION = migrations.length;
 
 // Run explicitly via db:init; opening a connection never changes the schema.
 export function migrateDatabase(database: Database.Database): number {

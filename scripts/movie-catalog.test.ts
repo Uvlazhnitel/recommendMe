@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { SCHEMA_VERSION } from '../src/lib/migrations';
 import { addCatalogMovie } from '../src/lib/movie-catalog';
 import { movieHandlers } from '../src/lib/movie-http';
 import { createTmdbClient, parseDetails, TmdbError } from '../src/lib/tmdb';
@@ -47,7 +48,7 @@ test('catalog migrates 3→4 after backup; stores verified details and leaves pe
     const before = snapshot(f.db); const { api, urls } = mocked(() => rich());
     const result = await addCatalogMovie(f.db, api, 10); assert.equal(result.status, 'created'); assert.equal(urls.length, 1);
     assert.equal(urls[0].pathname, '/3/movie/10'); assert.equal(urls[0].searchParams.get('append_to_response'), 'credits');
-    assert.equal(f.db.pragma('user_version', { simple: true }), 4); assert.equal(snapshot(f.db), before);
+    assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION); assert.equal(snapshot(f.db), before);
     const row = f.db.prepare('SELECT * FROM movies WHERE tmdb_id=10').get() as Record<string, unknown>;
     assert.equal(row.title, 'Dune'); assert.equal(row.media_type, 'movie'); assert.equal(row.runtime_minutes, 155);
     assert.equal(row.letterboxd_uri, null); assert.equal(row.tmdb_enrichment_status, 'matched'); assert.equal(row.original_language, 'en');

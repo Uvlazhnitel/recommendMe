@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 import { confirmMovieWatch, WatchError } from '../src/lib/movie-watch';
 import { watchHandler } from '../src/lib/watch-http';
 import { buildTasteContext } from '../src/lib/taste-context';
@@ -116,14 +116,14 @@ test('backup precedes migration 3→4; backup failure leaves data and schema unc
     await confirmMovieWatch(f.db, input(3, 100));
     const backup = new Database(join(f.folder, 'backups', readdirSync(join(f.folder, 'backups'))[0]), { readonly: true });
     assert.equal(backup.pragma('user_version', { simple: true }), 3); assert.equal(all(backup), before); backup.close();
-    assert.equal(f.db.pragma('user_version', { simple: true }), 4);
+    assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     f.db.close(); const reopened = new Database(f.path, { readonly: true }); assert.equal(personal(reopened, 3)!.rating_100, 100); reopened.close();
   } finally { f.close(); }
 });
 
 test('unknown schema is rejected without backups or writes', async () => {
   const f = fixture(); try {
-    for (const version of [2, 5]) {
+    for (const version of [2, SCHEMA_VERSION + 1]) {
       f.db.pragma(`user_version=${version}`); const before = all(f.db);
       await assert.rejects(confirmMovieWatch(f.db, input(), { backup: async () => { throw Error('Must not back up'); } }), /schema/);
       assert.equal(all(f.db), before); assert.equal(f.db.pragma('user_version', { simple: true }), version);

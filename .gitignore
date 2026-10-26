@@ -16,3 +16,6 @@ backups/
 .DS_Store
 npm-debug.log*
 *.taste.lock
+
+*.recommendations.lock
+.recommendation-runs/

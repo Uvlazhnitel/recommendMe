@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { createTmdbClient, matches, parseDetails, TmdbError } from '../src/lib/tmdb';
 import { enrichTmdb, type EnrichmentReport } from '../src/lib/tmdb-enrichment';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 import { openDatabase } from '../src/lib/db';
 
 const key = 'test-key-never-real';
@@ -115,7 +115,7 @@ test('successful enrichment migrates version 2, preserves source and personal da
     const progress: number[] = [];
     const result = await enrichTmdb(f.db, happy().api, { ...f.options(), onProgress: report => progress.push(report.processed) });
     assert.equal(result.matched, 1); assert.deepEqual(progress, [0, 1]); assert.equal(result.remainingWithoutId, 0);
-    assert.equal(f.db.pragma('user_version', { simple: true }), 4);
+    assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.deepEqual(preserved(), before);
     assert.deepEqual(f.db.prepare('SELECT title,release_year,letterboxd_uri FROM movies').all(), original);
     const row = f.db.prepare('SELECT tmdb_title,original_title,tmdb_release_year,runtime_minutes,tmdb_enrichment_status FROM movies').get();

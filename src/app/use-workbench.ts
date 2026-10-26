@@ -7,16 +7,28 @@ export type SearchFilm = { id: number; title: string; original_title: string | n
 export type Film = { movie_id: number; tmdb_id: number | null; title: string; year: number | null; watched: boolean;
   rating_100: number | null; rating_source: string; not_interested: boolean; original_rating_stars: number | null; poster_path: string | null; overview?: string | null; runtime?: number | null };
 type Library = { items: Film[]; page: number; total: number; total_pages: number };
-export function useWorkbench(mode: 'rate' | 'library') {
+export function useWorkbench(mode: 'rate' | 'library', initialMovieId?: number) {
   const [query, setQuery] = useState(''), [year, setYear] = useState('');
   const [results, setResults] = useState<SearchFilm[] | null>(null), [more, setMore] = useState(false);
   const [searching, setSearching] = useState(false), [searchError, setSearchError] = useState('');
   const [libraryQuery, setLibraryQuery] = useState(''), [rated, setRated] = useState('all');
   const [library, setLibrary] = useState<Library | null>(null), [libraryBusy, setLibraryBusy] = useState(true), [libraryError, setLibraryError] = useState('');
-  const [selected, setSelected] = useState<Film | null>(null), [selecting, setSelecting] = useState(false), [score, setScore] = useState('');
+  const [selected, setSelected] = useState<Film | null>(null), [selecting, setSelecting] = useState(initialMovieId !== undefined), [score, setScore] = useState('');
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null), [matches, setMatches] = useState<Match[]>([]);
   const searchRun = useRef(0), libraryRun = useRef(0), detailRun = useRef(0), actionLock = useRef(false);
   const filters = useRef({ q: '', rated: 'all' });
+
+  useEffect(() => {
+    if (mode !== 'rate' || initialMovieId === undefined) return;
+    const run = ++detailRun.current, controller = new AbortController();
+    api<Film>(`/api/library/${initialMovieId}`, { signal: controller.signal }).then(film => {
+      if (run === detailRun.current && !controller.signal.aborted) {
+        setSelected(film); setScore(film.rating_100 === null ? '' : String(film.rating_100));
+      }
+    }).catch(error => { if (!controller.signal.aborted && run === detailRun.current) setNotice({ error: true, text: message(error) }); })
+      .finally(() => { if (!controller.signal.aborted && run === detailRun.current) setSelecting(false); });
+    return () => controller.abort();
+  }, [mode, initialMovieId]);
 
   useEffect(() => {
     if (mode !== 'library') return;

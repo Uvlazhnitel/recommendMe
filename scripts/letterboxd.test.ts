@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { parseCsv, prepareLetterboxd, importLetterboxd } from '../src/lib/letterboxd';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 
 const wh = 'Date,Name,Year,Letterboxd URI\n';
 const rh = 'Date,Name,Year,Letterboxd URI,Rating\n';
@@ -146,7 +146,7 @@ test('migration from version 1 preserves data and includes new date in update tr
     const old = f.db.prepare('SELECT * FROM user_movies').get() as Record<string, unknown>;
     const backup = f.backup();
     await importLetterboxd(f.db, prepareLetterboxd(wh + w, rh + r), backup);
-    assert.equal(f.db.pragma('user_version', { simple: true }), 4);
+    assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.deepEqual(f.db.prepare('SELECT * FROM user_movies WHERE movie_id=1').get(), { ...old, letterboxd_rating_date: null });
     f.db.exec("UPDATE user_movies SET letterboxd_rating_date='2020-01-01' WHERE movie_id=1");
     assert.notEqual((f.db.prepare('SELECT updated_at FROM user_movies WHERE movie_id=1').get() as { updated_at: string }).updated_at, old.updated_at);

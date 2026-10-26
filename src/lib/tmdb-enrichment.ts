@@ -15,7 +15,7 @@ const json = (value: unknown) => value === null ? null : JSON.stringify(value);
 export async function enrichTmdb(database: Database.Database, client: TmdbClient, options: Options = {}): Promise<EnrichmentReport> {
   if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit <= 0)) throw new Error('limit must be a positive integer.');
   const version = database.pragma('user_version', { simple: true }) as number;
-  if (version < 2 || version > 4) throw new Error('TMDB enrichment requires schema version 2, 3 or 4.');
+  if (version < 2 || version > 5) throw new Error('TMDB enrichment requires schema version 2, 3, 4 or 5.');
   if (!options.dryRun) {
     if (!options.backupPath) throw new Error('A backup path is required before enrichment.');
     await database.backup(options.backupPath);
@@ -75,10 +75,10 @@ export async function enrichTmdb(database: Database.Database, client: TmdbClient
           if (owner) { item.status = 'ambiguous'; item.reason = 'TMDB ID was assigned to another record; no merge performed.'; }
           else {
             database.prepare(`UPDATE movies SET tmdb_id=?, tmdb_title=?, original_title=?, tmdb_release_year=?, original_language=?,
-              overview=?, genres_json=?, runtime_minutes=?, poster_path=?, tmdb_vote_average=?, tmdb_vote_count=?, tmdb_popularity=?,
+              overview=?, genres_json=?, runtime_minutes=?, poster_path=?, backdrop_path=?, tmdb_vote_average=?, tmdb_vote_count=?, tmdb_popularity=?,
               directors_json=?, credits_json=?, metadata_updated_at=?, media_type='movie' WHERE id=?`).run(
               details.id, details.title, details.original_title, details.year, details.original_language,
-              details.overview, json(details.genres), details.runtime, details.poster_path, details.vote_average, details.vote_count, details.popularity,
+              details.overview, json(details.genres), details.runtime, details.poster_path, details.backdrop_path, details.vote_average, details.vote_count, details.popularity,
               json(details.directors), json(details.credits), now, movie.id);
           }
         }

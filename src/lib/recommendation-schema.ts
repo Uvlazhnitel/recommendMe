@@ -1,5 +1,6 @@
 import type { MovieCandidate } from './candidates';
 import type { Evidence } from './taste-schema';
+import { tmdbImage } from './movie-images';
 
 export const RANKING_LIMITS = { candidates: 40, recommendations: 5, evidence: 6, why_fit: 1000, possible_mismatch: 600, input_bytes: 120000 } as const;
 export type RankingDiagnostic = { stage: 'input' | 'output' | 'final'; index?: number; tmdb_id?: number; reason: string };
@@ -32,10 +33,15 @@ export function parseCandidateReport(value: unknown) {
       (row.original_title !== null && !text(row.original_title)) || (row.directors !== null && !people(row.directors)) ||
       (row.vote_count !== null && !integer(row.vote_count, 0)) || (row.popularity !== null && (typeof row.popularity !== 'number' || !Number.isFinite(row.popularity) || row.popularity < 0)) ||
       typeof row.source !== 'string' || !['llm', 'tmdb', 'both'].includes(row.source)) { reject('invalid_candidate_metadata'); continue; }
+    if (['poster_path', 'backdrop_path'].some(key => row[key] !== undefined && row[key] !== null && (typeof row[key] !== 'string' || !tmdbImage(row[key])))) {
+      reject('invalid_candidate_image'); continue;
+    }
     candidates.push({ tmdb_id: row.tmdb_id, media_type: 'movie', title: row.title.trim(), original_title: row.original_title === null ? null : row.original_title.trim(),
       year: row.year, overview: row.overview.trim(), runtime: row.runtime, genres: row.genres.map(({ id, name }) => ({ id, name: name.trim() })),
       directors: row.directors === null ? null : row.directors.map(({ id, name }) => ({ id, name: name.trim() })), vote_count: row.vote_count as number | null,
-      popularity: row.popularity as number | null, source: row.source as MovieCandidate['source'] });
+      popularity: row.popularity as number | null, source: row.source as MovieCandidate['source'],
+      ...(Object.hasOwn(row, 'poster_path') ? { poster_path: row.poster_path as string | null } : {}),
+      ...(Object.hasOwn(row, 'backdrop_path') ? { backdrop_path: row.backdrop_path as string | null } : {}) });
   }
   return { candidates, diagnostics, input_count: value.candidates.length,
     warnings: value.status === 'partial' ? ['Input came from a partial candidate generation; only its verified candidates are considered.'] : [] };
