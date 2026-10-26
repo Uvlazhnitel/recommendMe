@@ -1,35 +1,47 @@
 'use client';
 
+import type { ReactNode, Ref } from 'react';
 import type { useWorkbench } from '../use-workbench';
+import { ratingDraft } from '../rating-draft';
 import { MoviePoster } from './movie-poster';
+import { RatingControl } from './rating-control';
 import { Button, LoadingState } from './ui';
 
-export function MovieEditor({ model: m }: { model: ReturnType<typeof useWorkbench> }) {
+export function MovieEditor({ model: m, enhanced = false, headingRef, feedback }: { model: ReturnType<typeof useWorkbench>; enhanced?: boolean; headingRef?: Ref<HTMLHeadingElement>; feedback?: ReactNode }) {
   const film = m.selected;
-  if (m.selecting) return <LoadingState>Загрузка фильма…</LoadingState>;
-  if (!film) return <section className="selection-hint"><p>Выберите фильм, чтобы открыть детали и сохранить оценку.</p></section>;
-  return <section className="movie-editor" aria-label="Выбранный фильм">
-    <div className="editor-film"><MoviePoster path={film.poster_path} title={film.title} sizes="(max-width: 600px) 80px, 120px" />
-      <div><p className="muted">{film.year ?? 'Год неизвестен'}</p><h2>{film.title}</h2>
-        <p>{film.watched ? 'Уже просмотрен' : 'Просмотр не отмечен'}</p>
-        <p className="current-score">{film.rating_100 === null ? 'Без оценки' : <><strong>{film.rating_100}</strong><span> / 100</span></>}</p>
-        <p className="muted">{film.rating_source === 'letterboxd' ? 'Оценка из Letterboxd' : film.rating_source === 'manual' ? 'Ваша оценка' : 'Оценка ещё не назначена'}</p>
-      </div>
+  if (m.selecting || m.pending === 'select') return <LoadingState>Загрузка фильма…</LoadingState>;
+  if (!film) return <section className="selection-hint">{enhanced ? <><h2>Ваше впечатление о фильме</h2><p>Выберите фильм в результатах. Здесь появятся детали и шкала оценки.</p></> : <p>Выберите фильм, чтобы открыть детали и сохранить оценку.</p>}</section>;
+  const draft = ratingDraft(m.score);
+  const posterAndTitle = <div className="editor-film"><MoviePoster path={film.poster_path} title={film.title} sizes={enhanced ? '(max-width: 767px) 88px, (max-width: 1023px) 120px, 96px' : '(max-width: 600px) 80px, 120px'} />
+    <div><p className="muted">{[film.year ?? 'Год неизвестен', ...(enhanced ? [film.runtime_minutes ? `${film.runtime_minutes} мин` : null] : [])].filter(Boolean).join(' · ')}</p>
+      <h2 ref={headingRef} tabIndex={enhanced ? -1 : undefined}>{film.title}</h2>
+      {enhanced && film.genres?.length ? <p className="editor-genres">{film.genres.map(genre => genre.name).join(' · ')}</p> : null}
+      <p className="watch-status">{film.watched ? 'Уже просмотрен' : enhanced ? 'Не просмотрен' : 'Просмотр не отмечен'}</p>
+      <p className="current-score">{enhanced ? <span>Сохранено: </span> : null}{film.rating_100 === null ? 'Без оценки' : <><strong>{film.rating_100}</strong><span> / 100</span></>}</p>
+      <p className="muted">{film.rating_source === 'letterboxd' ? 'Оценка из Letterboxd' : film.rating_source === 'manual' ? 'Ваша оценка' : 'Оценка ещё не назначена'}</p>
     </div>
-    {film.overview ? <p className="film-overview">{film.overview}</p> : null}
+  </div>;
+  const ratingFields = enhanced ? <RatingControl value={m.score} onChange={m.setScore} watched={film.watched} /> :
+    <label>{film.watched ? 'Новая оценка' : <>Оценка просмотра <span className="muted">(необязательно)</span></>}<span className="input-with-suffix"><input name={film.watched ? 'edit-rating' : 'watch-rating'} type="number" min={0} max={100} step={1} required={film.watched} value={m.score} onChange={e => m.setScore(e.target.value)} /><span>/ 100</span></span></label>;
+  return <section className={`movie-editor ${enhanced ? 'rate-editor' : ''}`} aria-label="Выбранный фильм" aria-busy={m.busy}>
+    {posterAndTitle}
+    {!enhanced && film.overview ? <p className="film-overview">{film.overview}</p> : null}
     <fieldset disabled={m.busy}>
       <legend className="sr-only">Просмотр и оценка {film.title}</legend>
-      {film.watched ? <form className="score-form" onSubmit={m.saveScore}>
-        <label>Новая оценка <span className="input-with-suffix"><input name="edit-rating" type="number" min={0} max={100} step={1} required value={m.score} onChange={e => m.setScore(e.target.value)} /><span>/ 100</span></span></label>
-        <Button>Сохранить оценку</Button><Button tone="quiet" type="button" onClick={() => m.edit(null)}>Очистить оценку</Button>
-      </form> : <form className="score-form" onSubmit={m.watch}>
-        <label>Оценка просмотра <span className="muted">(необязательно)</span><span className="input-with-suffix"><input name="watch-rating" type="number" min={0} max={100} step={1} value={m.score} onChange={e => m.setScore(e.target.value)} /><span>/ 100</span></span></label>
-        <Button>Подтвердить просмотр</Button>
-      </form>}
-      <p className="field-help">{film.watched ? 'Очистка оценки сохраняет факт просмотра.' : 'Можно сохранить просмотр без оценки. Ноль — настоящая оценка.'}</p>
-      <div className="rejection-controls"><Button tone="quiet" type="button" disabled={film.tmdb_id === null} onClick={m.reject}>{film.not_interested ? 'Снять «Неинтересно»' : 'Неинтересно'}</Button>
-        <p className="field-help">{film.tmdb_id === null ? 'Нужен подтверждённый TMDB ID.' : film.not_interested ? 'Фильм скрыт из будущих рекомендаций. Оценка сохранена.' : 'Скрыть из рекомендаций, сохранив просмотр и оценку.'}</p>
+      <form className="score-form" onSubmit={film.watched ? m.saveScore : m.watch}>
+        {ratingFields}
+        <div className="score-actions"><Button disabled={enhanced && (draft.invalid || (film.watched && draft.value === null))}>
+          {m.pending === 'watch' ? 'Сохраняем просмотр…' : m.pending === 'rating' ? 'Сохраняем оценку…' : film.watched ? 'Сохранить оценку' : 'Подтвердить просмотр'}
+        </Button>{film.watched ? <Button tone="quiet" type="button" onClick={() => m.edit(null)}>{m.pending === 'clear' ? 'Очищаем…' : 'Очистить оценку'}</Button> : null}</div>
+      </form>
+      {enhanced ? feedback : null}
+      <p className="field-help">{film.watched ? 'Пустое поле не очищает сохранённую оценку. Для этого есть отдельная кнопка.' : 'Без оценки тоже можно подтвердить просмотр. Он сохранится в вашей истории.'}</p>
+      <div className="rejection-controls">
+        {enhanced ? <h3>{film.not_interested ? 'Скрыт из рекомендаций' : 'Не хотите видеть в рекомендациях?'}</h3> : null}
+        <Button tone="quiet" type="button" disabled={film.tmdb_id === null} onClick={m.reject}>{m.pending === 'reject' ? 'Сохраняем…' : film.not_interested ? 'Снять «Неинтересно»' : 'Неинтересно'}</Button>
+        <p className="field-help">{film.tmdb_id === null ? 'Нужен подтверждённый TMDB ID.' : film.not_interested ? 'Текущий запрет можно снять. История отклонения сохранится.' : 'Это отдельное решение: оценка и факт просмотра не изменятся.'}</p>
       </div>
     </fieldset>
+    {enhanced && film.overview ? <div className="editor-overview"><h3>О фильме</h3><p>{film.overview}</p></div> : null}
   </section>;
 }

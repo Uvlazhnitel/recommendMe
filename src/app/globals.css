@@ -246,3 +246,128 @@ fieldset { min-width: 0; border: 0; margin: 24px 0 0; padding: 0; }
 .paid-confirmation p { margin-top: var(--space-4); color: var(--color-muted); }
 .paid-confirmation > div { margin-top: var(--space-5); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); }
 .paid-confirmation .button { min-height: 48px; }
+
+/* Phase 4.3: the rating screen, scoped away from the library and Spotlight. */
+.score-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.rate-workbench { margin-top: var(--space-5); }
+.rate-search { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: var(--space-4); padding-bottom: var(--space-5); border-bottom: var(--border); }
+.rate-search label { font-size: 14px; }
+.rate-query { grid-column: 1 / -1; }
+.rate-query-input { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-left: 16px; background: var(--color-surface); border: var(--border); border-radius: var(--radius-control); }
+.rate-query-input:focus-within { border-color: var(--color-accent); }
+.rate-query-input svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--color-muted); }
+.rate-query-input input { border: 0; background: transparent; margin: 0; padding-left: 0; min-height: 56px; }
+.rate-year { grid-column: 2; grid-row: 2; }
+.rate-year .muted { display: block; font-size: 11px; line-height: 1; }
+.rate-year input { min-height: 48px; }
+.rate-search > .button { grid-column: 1; grid-row: 2; align-self: end; min-height: 48px; }
+.rate-layout { display: grid; gap: var(--space-6); margin-top: var(--space-5); align-items: start; }
+.rate-results, .rate-detail { min-width: 0; }
+.rate-detail { display: none; scroll-margin-top: 16px; }
+.is-editing .rate-results { display: none; }
+.is-editing .rate-detail { display: block; }
+.rate-intro { max-width: 480px; padding: var(--space-6) 0; }
+.rate-intro > svg { width: 30px; height: 30px; color: var(--color-accent); margin-bottom: var(--space-5); }
+.rate-intro h2 { font-size: clamp(28px, 4vw, 38px); line-height: 1.18; }
+.rate-intro p { margin-top: var(--space-4); color: var(--color-muted); font-size: 15px; max-width: 420px; }
+.rate-results-heading { font-size: 20px; line-height: 1.3; margin-bottom: var(--space-4); scroll-margin-top: 24px; }
+.rate-results-heading > span { display: block; font: 400 13px/1.6 var(--font-body); color: var(--color-muted); margin-top: 6px; letter-spacing: 0; }
+.rate-result-list { list-style: none; padding: 0; margin: 0; }
+.rate-result-list > li + li { margin-top: 8px; }
+.rate-result { width: 100%; display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px 16px; padding: 12px; border: 1px solid transparent; border-bottom-color: var(--color-border); background: transparent; color: var(--color-text); text-align: left; }
+.rate-result:hover { background: var(--color-surface); }
+.rate-result.selected { border-color: var(--color-accent); background: var(--color-surface); }
+.rate-result .movie-poster { width: 64px; grid-row: 1 / 3; }
+.rate-result-copy { min-width: 0; align-self: end; }
+.rate-result-title { display: block; font-size: 17px; line-height: 1.4; font-weight: 750; overflow-wrap: anywhere; }
+.rate-result-year, .rate-original-title { display: block; font-size: 13px; line-height: 1.5; color: var(--color-muted); margin-top: 4px; overflow-wrap: anywhere; }
+.rate-original-title { font-size: 12px; }
+.rate-select-label { grid-column: 2; align-self: start; font-size: 13px; font-weight: 700; color: var(--color-accent); }
+.rate-back { margin-bottom: var(--space-5); }
+.rate-editor { padding: 0; border: 0; }
+.rate-editor .editor-film { gap: var(--space-4); }
+.rate-editor .editor-film > .movie-poster { width: 88px; }
+.rate-editor .editor-film h2 { font-size: clamp(25px, 3.5vw, 34px); margin: 6px 0 10px; scroll-margin-top: 24px; }
+.rate-editor .editor-film p { font-size: 13px; line-height: 1.6; }
+.rate-editor .editor-genres { margin-bottom: 10px; color: var(--color-muted); }
+.rate-editor .watch-status { font-weight: 700; }
+.rate-editor .editor-film .current-score { font-size: 13px; margin-top: 6px; }
+.rate-editor .current-score strong { font-size: 18px; }
+.rate-editor fieldset { margin-top: var(--space-6); }
+.rate-editor .score-form { display: block; }
+.rating-control { width: 100%; }
+.rating-control-heading { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); min-height: 88px; }
+.rating-control-heading > label { font-size: 17px; font-weight: 750; width: auto; }
+.rating-control-heading label > span { display: block; margin-top: 6px; font-size: 12px; font-weight: 400; color: var(--color-muted); }
+.rating-number { display: flex; align-items: baseline; gap: 6px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.rating-number strong { color: var(--color-accent); font-size: clamp(56px, 7vw, 80px); line-height: 1; font-weight: 800; letter-spacing: -.065em; }
+.rating-number > span { color: var(--color-muted); font-size: 14px; }
+.rating-number .rating-unset { font-size: 17px; font-weight: 650; color: var(--color-muted); }
+.rate-editor input.rating-range { display: block; appearance: none; -webkit-appearance: none; width: 100%; height: 44px; min-height: 44px; padding: 0; margin: 16px 0 0; background: transparent; border: 0; cursor: pointer; border-radius: 0; touch-action: pan-y; }
+.rating-range::-webkit-slider-runnable-track { height: 5px; border-radius: 5px; background: linear-gradient(to right, var(--color-accent) 0 var(--rating-fill), var(--color-border) var(--rating-fill) 100%); }
+.rating-range::-moz-range-track { height: 5px; border-radius: 5px; background: linear-gradient(to right, var(--color-accent) 0 var(--rating-fill), var(--color-border) var(--rating-fill) 100%); }
+.rating-range::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%; background: var(--color-accent); border: 4px solid var(--color-text); margin-top: -9.5px; }
+.rating-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--color-accent); border: 4px solid var(--color-text); }
+.no-rating .rating-range::-webkit-slider-thumb { opacity: 0; }
+.no-rating .rating-range::-moz-range-thumb { opacity: 0; }
+.rating-endpoints { display: flex; justify-content: space-between; color: var(--color-muted); font-size: 12px; }
+.rating-exact { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: var(--space-5); }
+.rate-editor .rating-exact label { width: auto; font-size: 14px; }
+.rating-exact .input-with-suffix { width: 130px; margin: 0; }
+.rating-exact input { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rating-validation { font-size: 13px; color: var(--color-danger); margin-top: 12px; }
+.rate-editor .score-actions { margin-top: var(--space-5); }
+.rate-editor .score-actions > .button { width: 100%; min-height: 48px; }
+.rate-editor .field-help { font-size: 13px; }
+.rate-editor .rejection-controls { margin-top: var(--space-6); padding-top: var(--space-5); }
+.rate-editor .rejection-controls h3 { font-size: 16px; font-weight: 700; margin-bottom: var(--space-4); }
+.rate-editor .rejection-controls .button { font-size: 13px; min-height: 44px; }
+.editor-overview { margin-top: var(--space-6); }
+.editor-overview h3 { font-size: 17px; }
+.editor-overview p { margin-top: 12px; color: var(--color-muted); font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.rate-duplicates { margin: var(--space-5) 0; padding: var(--space-5); border: var(--border); border-radius: var(--radius-control); }
+.rate-duplicates h3 { font-size: 18px; }
+.rate-duplicates p, .rate-duplicates li { font-size: 14px; color: var(--color-muted); margin-top: 12px; }
+.rate-duplicates ul { padding-left: 18px; }
+.rate-duplicates li > span { display: block; font-size: 12px; }
+.rate-return { display: inline-flex; align-items: center; min-height: 48px; margin-top: var(--space-5); color: var(--color-accent); font-size: 14px; font-weight: 650; }
+@media (min-width: 768px) {
+  .rate-search { grid-template-columns: minmax(0, 1fr) 120px auto; align-items: end; gap: var(--space-5); }
+  .rate-query { grid-column: 1; }
+  .rate-search .rate-year { grid-column: 2; grid-row: auto; }
+  .rate-year .muted { display: inline; }
+  .rate-search > .button { grid-column: 3; grid-row: auto; min-height: 56px; }
+  .rate-year input { min-height: 56px; }
+  .rate-result { grid-template-columns: 80px minmax(0, 1fr) auto; gap: 20px; }
+  .rate-result .movie-poster { width: 80px; grid-row: auto; }
+  .rate-result-copy { align-self: center; }
+  .rate-select-label { grid-column: 3; align-self: center; }
+  .rate-editor .editor-film > .movie-poster { width: 120px; }
+}
+@media (min-width: 1024px) {
+  .rate-layout { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-7); margin-top: var(--space-6); }
+  .rate-results, .is-editing .rate-results { display: block; }
+  .rate-detail { display: block; padding: var(--space-6); border-radius: var(--radius-media); background: var(--color-surface); }
+  .rate-detail .selection-hint { padding: 0; }
+  .rate-detail .selection-hint h2 { font-size: 24px; margin-bottom: 16px; }
+  .rate-detail .selection-hint p { font-size: 15px; }
+  .rate-back { display: none; }
+  .rate-result { padding: 16px 8px; gap: 16px; }
+  .rate-editor .editor-film > .movie-poster { width: 96px; }
+  .rate-editor .editor-film { gap: 20px; }
+  .rate-editor .editor-film h2 { font-size: 28px; }
+  .rate-editor .rating-exact .input-with-suffix { background: var(--color-bg); }
+  .rate-editor fieldset { margin-top: 24px; }
+  .rate-editor .rating-control-heading { min-height: 80px; }
+  .rate-editor .rating-exact { margin-top: 16px; }
+}
+@media (min-width: 1280px) {
+  .rate-editor .score-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .rate-editor .score-actions > .button:only-child { grid-column: 1 / -1; }
+  .rate-editor .editor-film h2 { font-size: 34px; }
+}
+
+@media (max-width: 767px) {
+  html:has(.rate-workbench) { scroll-padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 16px); }
+  .rate-workbench :is(input, button, a) { scroll-margin-block: 16px; }
+}

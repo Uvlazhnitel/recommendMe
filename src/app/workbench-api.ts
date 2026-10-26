@@ -4,7 +4,7 @@ const errors: Record<string, string> = {
   movie_not_found: 'Фильм не найден.', possible_duplicate: 'Возможно, фильм уже есть в старой истории. Автоматическое объединение не выполнено.',
   invalid_tmdb_id: 'Некорректный TMDB ID.', invalid_movie_id: 'Некорректный локальный ID.',
   invalid_watch: 'Проверьте данные просмотра и оценку 0–100.', invalid_rating: 'Оценка должна быть целым числом от 0 до 100.',
-  rating_already_exists: 'Оценка уже существует. Измените её в библиотеке.', movie_not_watched: 'Сначала подтвердите просмотр фильма.',
+  rating_already_exists: 'Оценка уже существует. Обновите данные фильма перед редактированием.', movie_not_watched: 'Сначала подтвердите просмотр фильма.',
   invalid_library_query: 'Проверьте параметры поиска библиотеки.', forbidden_origin: 'Запрос отклонён: откройте приложение по тому же адресу.',
   catalog_unavailable: 'Не удалось добавить фильм. Проверьте доступность базы и резервного копирования.',
   watch_unavailable: 'Просмотр не сохранён. Проверьте доступность базы и резервного копирования.',
@@ -12,7 +12,7 @@ const errors: Record<string, string> = {
   rejection_unavailable: 'Отклонение не изменено. Проверьте базу и резервное копирование.',
 };
 export class ApiError extends Error {
-  constructor(code: string, public readonly matches?: Match[]) { super(errors[code] ?? 'Сервис не смог выполнить операцию.'); }
+  constructor(public readonly code: string, public readonly matches?: Match[]) { super(errors[code] ?? 'Сервис не смог выполнить операцию.'); }
 }
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
