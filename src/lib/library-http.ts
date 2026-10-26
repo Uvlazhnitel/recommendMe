@@ -1,0 +1,55 @@
+import { openDatabase } from './db';
+import { JsonInputError, readJsonBody } from './http-json';
+import { LibraryError, localMovieId, parseLibraryQuery, ratingValue, readLibrary, readLibraryMovie, updateLibraryRating } from './library';
+
+const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
+function failure(error: unknown) {
+  if (error instanceof JsonInputError) return reply({ error: error.code }, 400);
+  if (error instanceof LibraryError) return reply({ error: error.code }, error.code === 'movie_not_found' ? 404 : error.code === 'movie_not_watched' ? 409 : 400);
+  return reply({ error: 'library_unavailable', message: 'The local library could not complete the operation.' }, 500);
+}
+type Context = { params: Promise<{ id: string }> };
+async function routeId(context: Context) {
+  const { id } = await context.params;
+  if (!/^[1-9]\d*$/.test(id)) throw new LibraryError('invalid_movie_id');
+  return localMovieId(Number(id));
+}
+export function libraryHandlers(dependencies: { open?: typeof openDatabase; backup?: Parameters<typeof updateLibraryRating>[3] } = {}) {
+  return {
+    async list(request: Request) {
+      let db: ReturnType<typeof openDatabase> | undefined;
+      try {
+        const params = new URL(request.url).searchParams; parseLibraryQuery(params);
+        db = (dependencies.open ?? openDatabase)({ readonly: true });
+        return reply(readLibrary(db, params));
+      } catch (error) { return failure(error); }
+      finally { db?.close(); }
+    },
+    async details(_request: Request, context: Context) {
+      let db: ReturnType<typeof openDatabase> | undefined;
+      try {
+        const id = await routeId(context);
+        db = (dependencies.open ?? openDatabase)({ readonly: true });
+        return reply(readLibraryMovie(db, id));
+      } catch (error) { return failure(error); }
+      finally { db?.close(); }
+    },
+    async rating(request: Request, context: Context) {
+      let id: number, rating: number | null;
+      try {
+        id = await routeId(context);
+        let body: unknown;
+        try { body = await readJsonBody(request); }
+        catch (error) { if (error instanceof JsonInputError) throw error; throw new LibraryError('invalid_rating'); }
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'rating_100')) throw new LibraryError('invalid_rating');
+        rating = ratingValue((body as { rating_100: unknown }).rating_100);
+      } catch (error) { return failure(error); }
+      let db: ReturnType<typeof openDatabase> | undefined;
+      try {
+        db = (dependencies.open ?? openDatabase)();
+        return reply(await updateLibraryRating(db, id, rating, dependencies.backup));
+      } catch (error) { return failure(error); }
+      finally { db?.close(); }
+    },
+  };
+}

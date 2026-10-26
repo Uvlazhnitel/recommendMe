@@ -2,7 +2,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
 export class TmdbError extends Error {
-  constructor(message: string, public readonly stop = false) { super(message); }
+  constructor(message: string, public readonly stop = false, public readonly status?: number) { super(message); }
 }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TmdbError('Invalid TMDB object.');
@@ -108,7 +108,7 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
             if (!Number.isFinite(retryAfter)) retryAfter = 0;
             if (retryAfter > 60000) throw new TmdbError('TMDB requests a pause longer than 60 seconds. Resume later.', true);
           }
-          if (response.status !== 429 && response.status < 500) throw new TmdbError(`TMDB HTTP ${response.status}.`);
+          if (response.status !== 429 && response.status < 500) throw new TmdbError(`TMDB HTTP ${response.status}.`, false, response.status);
         } else {
           try { return await response.json(); }
           catch {
@@ -132,6 +132,19 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
       const body = object(await request(`/movie/${movieId}/recommendations`, { page: '1' }));
       if (!Array.isArray(body.results) || body.results.length > 20) throw new TmdbError('Invalid TMDB recommendations response.');
       return [...new Map(body.results.map(row => { const parsed = candidate(row); return [parsed.id, parsed] as const; })).values()];
+    },
+    async searchInteractive(query: string, releaseYear?: number) {
+      const params: Record<string, string> = { query, page: '1', include_adult: 'true' };
+      if (releaseYear !== undefined) params.year = String(releaseYear);
+      const body = object(await request('/search/movie', params));
+      const pages = number(body.total_pages, true);
+      if (pages === null || !Array.isArray(body.results) || body.results.length > 20) throw new TmdbError('Invalid TMDB search response.');
+      const results = new Map<number, Candidate & { poster_path: string | null }>();
+      for (const value of body.results) {
+        const parsed = candidate(value);
+        results.set(parsed.id, { ...parsed, poster_path: string(object(value).poster_path) });
+      }
+      return { results: [...results.values()], has_more: pages > 1 };
     },
     async search(title: string, releaseYear: number) {
       const results = new Map<number, Candidate>();
