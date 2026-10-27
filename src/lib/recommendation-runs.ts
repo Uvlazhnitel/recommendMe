@@ -6,6 +6,10 @@ import { isRequestId } from './recommendation-batches';
 import type { generateCandidates } from './candidates';
 import type { rankRecommendations } from './recommendations';
 
+// PID namespaces commonly reuse the server PID after a container restart.
+// A lock predating this process cannot belong to it, even if kill(pid, 0) succeeds.
+const processStartedAt = Date.now() - process.uptime() * 1000;
+
 export type RunStage = 'starting' | 'candidates' | 'ranking' | 'saving' | 'saved' | 'failed' | 'save_failed';
 export type StoredRun = {
   request_id: string; started_at: string; stage: RunStage; code?: string; result_id?: string;
@@ -74,6 +78,8 @@ export function runStore(databasePath: string) {
       try {
         const owner = JSON.parse(readFileSync(/*turbopackIgnore: true*/ paths.lock, 'utf8'));
         if (!Number.isSafeInteger(owner.pid) || owner.pid < 1) return false;
+        if (owner.pid === process.pid && typeof owner.started_at === 'string' &&
+          Date.parse(owner.started_at) < processStartedAt) return false;
         try { process.kill(owner.pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
       } catch { return false; }
     },

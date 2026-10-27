@@ -95,7 +95,13 @@ export default function RecommendationScreen() {
     {data?.generation.recoverable_save && data.generation.request_id ? <Button tone="light" disabled={busy || acting} onClick={() => { void start(data.generation.request_id!, true); }}>Повторить сохранение без AI</Button> : null}
     {data?.readiness.profile_refresh?.status === 'refresh_recommended' ? <p className="readiness-notice">Профиль вкуса стоит обновить. Новые оценки уже учитываются в подборе; автоматического пересчёта нет.</p> : null}
     {error && !busy ? <Button tone="quiet" disabled={acting} onClick={() => { setError(''); void refresh(); }}>Проверить состояние</Button> : null}
-    <dialog ref={dialog} className="paid-confirmation" aria-labelledby="paid-heading" aria-describedby="paid-description">
+    <dialog ref={dialog} className="paid-confirmation" aria-labelledby="paid-heading" aria-describedby="paid-description" onKeyDown={event => {
+      if (event.key !== 'Tab') return;
+      const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+      const first = buttons[0], last = buttons[buttons.length - 1], active = event.currentTarget.ownerDocument.activeElement;
+      if (event.shiftKey && active === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first?.focus(); }
+    }}>
       <h2 id="paid-heading">Начать персональный подбор?</h2>
       <p id="paid-description">Подбор использует платный OpenAI API — обычно два запроса. Стоимость зависит от модели и объёма данных. Автоматического повтора после ошибки не будет.</p>
       <div><Button tone="quiet" onClick={() => dialog.current?.close()}>Отмена</Button><Button onClick={() => { dialog.current?.close(); void start(crypto.randomUUID()); }}>Да, подобрать</Button></div>

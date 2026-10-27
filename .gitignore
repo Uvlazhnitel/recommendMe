@@ -4,6 +4,7 @@ out/
 coverage/
 *.tsbuildinfo
 .env*
+*.env
 !.env.example
 data/
 *.sqlite*

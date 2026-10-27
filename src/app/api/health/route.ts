@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export function GET() {
   try {
-    checkDatabase();
+    checkDatabase({ readonly: true });
     return Response.json({ status: 'ok', database: 'ok' }, {
       headers: { 'Cache-Control': 'no-store' },
     });

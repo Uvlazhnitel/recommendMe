@@ -1,0 +1,255 @@
+import assert from 'node:assert/strict';
+import { spawn, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, renameSync, openSync, closeSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve, join, dirname, relative, isAbsolute, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url);
+const Database = require('better-sqlite3'), args = process.argv.slice(2);
+function option(name, fallback) { const i = args.indexOf(name); if (i < 0) return fallback; if (!args[i+1] || args[i+1].startsWith('--')) throw Error(`Missing ${name} value`); return args[i+1]; }
+if (args.some((arg,i) => i%2 === 0 && !['--port','--output','--playwright-path'].includes(arg))) throw Error('Options: --port, --output, --playwright-path.');
+const port = Number(option('--port', '45152'));
+assert.ok(Number.isInteger(port) && port > 1024 && port <= 65535, 'Use a test port from 1025 to 65535.');
+const output = resolve(option('--output') ?? mkdtempSync(join(tmpdir(), 'recommendme-phase4-evidence-')));
+const outputRelative = relative(root, output);
+assert.ok(outputRelative === '..' || outputRelative.startsWith('..'+sep) || isAbsolute(outputRelative), 'Screenshots/output must be outside the repository.');
+mkdirSync(output, { recursive: true });
+let playwright;
+try { playwright = require(option('--playwright-path', 'playwright')); }
+catch { throw Error('Playwright is not installed locally. Pass --playwright-path pointing to an existing installation; no packages were installed.'); }
+assert.ok(existsSync(join(root, '.next/BUILD_ID')), 'Run npm run build before test:ux.');
+const hash = value => createHash('sha256').update(value).digest('hex');
+function contrast(a,b) {
+  const luminance=color=>{const text=color.trim(),rgb=text.startsWith('#')?[0,2,4].map(i=>parseInt(text.slice(1+i,3+i),16)):(text.match(/[\d.]+/g)??[]).slice(0,3).map(Number);
+    return rgb.map(value=>{const x=value/255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;}).reduce((sum,x,i)=>sum+x*[.2126,.7152,.0722][i],0);};
+  const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);
+}
+
+function protectedState() {
+  const files = ['data/movies.sqlite','.env.local','data/import/ratings(6).csv','data/import/watched(6).csv'];
+  const result = { files: Object.fromEntries(files.filter(file=>existsSync(join(root,file))).map(file=>[file,hash(readFileSync(join(root,file)))])) };
+  if (existsSync(join(root,'data/movies.sqlite'))) {
+    const db = new Database(join(root,'data/movies.sqlite'), { readonly: true, fileMustExist: true });
+    try { Object.assign(result, { schema: db.pragma('user_version',{simple:true}), tables: Object.fromEntries(['movies','user_movies','taste_profile','recommendations'].map(table=>[table,hash(JSON.stringify(db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()))])), integrity: db.pragma('integrity_check'), fk: db.pragma('foreign_key_check') }); }
+    finally { db.close(); }
+  }
+  return result;
+}
+const before = protectedState(), temp = mkdtempSync(join(tmpdir(),'recommendme-phase4-run-'));
+const metadata = join(temp,'fixture.json'), controlPath = join(temp,'control.json'), callsPath = join(temp,'calls.jsonl');
+const base = `http://127.0.0.1:${port}`, checks = [], errors = [], expectedNetworkErrors = [], measurements = [];
+let child, browser, fixture, page;
+const report = { status: 'running', base: `127.0.0.1:${port}`, real_openai_calls: 0, real_tmdb_calls: 0, checks, errors, expectedNetworkErrors, measurements };
+function control(value) { writeFileSync(controlPath,JSON.stringify({round:1,mode:'ok',delay:0,...value}),{mode:0o600}); }
+function calls(provider) { return existsSync(callsPath) ? readFileSync(callsPath,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line)).filter(item=>!provider||item.provider===provider).length : 0; }
+const openaiCalls = () => calls('api.openai.com');
+function check(name) { checks.push(name); console.log(`PASS ${name}`); }
+async function until(fn, description, timeout=20000) {
+  const end = Date.now()+timeout; let last;
+  while(Date.now()<end) { try { const value=await fn(); if(value)return value; } catch(error){last=error;} await new Promise(resolve=>setTimeout(resolve,100)); }
+  throw Error(`Timed out: ${description}${last?` (${last.message})`:''}`);
+}
+function database(fn) { const db=new Database(fixture.path); db.pragma('foreign_keys=ON'); try{return fn(db);}finally{db.close();} }
+async function stop() {
+  const owned=child;child=undefined;if(!owned||owned.exitCode!==null)return;
+  await new Promise(resolveExit=>{
+    const timer=setTimeout(()=>{try{process.kill(-owned.pid,'SIGKILL');}catch{}resolveExit();},5000);
+    owned.once('exit',()=>{clearTimeout(timer);resolveExit();});
+    try{process.kill(-owned.pid,'SIGTERM');}catch(error){clearTimeout(timer);if(error.code!=='ESRCH')throw error;resolveExit();}
+  });
+}
+async function start() {
+  await new Promise((resolveReady,reject)=>{const server=createServer();server.once('error',()=>reject(Error(`Test port ${port} is occupied; no process was stopped.`)));server.listen(port,'127.0.0.1',()=>server.close(resolveReady));});
+  const log=openSync(join(output,'server.log'),'a');
+  child=spawn(process.execPath,[join(root,'node_modules/next/dist/bin/next'),'start','--hostname','127.0.0.1','--port',String(port)],{cwd:root,detached:true,stdio:['ignore',log,log],env:{...process.env,
+    DATABASE_PATH:fixture.path,OPENAI_API_KEY:'phase4-mock-openai',OPENAI_MODEL:'phase4-mock-model',TMDB_API_KEY:'phase4-mock-tmdb',NEXT_TELEMETRY_DISABLED:'1',
+    PHASE4_CONTROL:controlPath,PHASE4_CALLS:callsPath,NODE_OPTIONS:`--import ${join(root,'scripts/fixtures/phase4-providers.mjs')}`}});closeSync(log);
+  await until(async()=>{const r=await fetch(base+'/api/health');return r.ok;},'isolated production server');
+}
+async function state() { const r=await page.request.get(base+'/api/recommendations');assert.equal(r.status(),200);return r.json(); }
+async function go(path) { await page.goto(base+path);await page.waitForLoadState('networkidle'); }
+async function libraryReady() { await page.locator('.library-results[aria-busy="false"]').waitFor(); }
+async function screenshot(name, fullPage=false) {
+  await page.evaluate(()=>document.fonts.ready);
+  if(['library-mobile','library-desktop'].includes(name))await page.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await page.screenshot({path:join(output,name+'.png'),fullPage,animations:'disabled'});
+}
+const alerts = () => page.locator('main [role="alert"]');
+const rating = () => page.getByRole('spinbutton',{name:'Точное число'});
+async function saveRating(value) {
+  await rating().fill(String(value));await page.getByRole('button',{name:'Сохранить оценку',exact:true}).click();
+  await page.getByRole('status').filter({hasText:/Оценка (сохранена|не изменилась)/}).waitFor();assert.equal(await rating().inputValue(),String(value));
+}
+async function clearRating() { await page.getByRole('button',{name:'Очистить оценку',exact:true}).click();await page.getByRole('status').filter({hasText:/Оценка (очищена|не изменилась)/}).waitFor();assert.equal(await rating().inputValue(),''); }
+async function dialogOpen() { await page.getByRole('button',{name:/^(Подобрать фильмы|Ещё рекомендации)$/}).click();await page.getByRole('dialog').waitFor(); }
+async function generate(settings, expected=201) {
+  control(settings);await dialogOpen();const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/recommendations/generate'&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'Да, подобрать',exact:true}).click();const result=await response;assert.equal(result.status(),expected);
+  if(expected===201){await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();}
+  else await alerts().filter({hasText:/Не удалось|Нет подходящих|Подбор|Финальный|Время ожидания/}).first().waitFor();
+  return result.json();
+}
+try {
+  execFileSync(process.execPath,['--import','tsx',join(root,'scripts/fixtures/phase4-prepare.ts'),metadata],{cwd:root,stdio:'pipe'});
+  fixture=JSON.parse(readFileSync(metadata,'utf8'));control({});writeFileSync(callsPath,'',{mode:0o600});await start();console.log(`QA production: ${base}; evidence: ${output}`);
+  browser=await playwright.chromium.launch({channel:'chrome',headless:true});
+  const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();
+  page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error'){if(/Failed to load resource|net::ERR_/.test(message.text()))expectedNetworkErrors.push(message.text());else errors.push(message.text());}});
+  const reads=[];page.on('request',request=>{if(request.method()==='GET'&&request.url().startsWith(base+'/api/'))reads.push(request.url());});
+  const posts=[];page.on('request',request=>{if(request.method()==='POST'&&request.url().includes('/api/recommendations/generate'))posts.push(JSON.parse(request.postData()));});
+  await go('/');assert.match(await page.title(),/recommendMe/);assert.equal(new URL(page.url()).origin,base);assert.equal(openaiCalls(),0);await screenshot('recommendations-empty');
+  const pairs=await page.evaluate(()=>{const s=getComputedStyle(document.documentElement),b=getComputedStyle(document.querySelector('.button-primary'));
+    return [[s.getPropertyValue('--color-text'),s.getPropertyValue('--color-bg')],[s.getPropertyValue('--color-muted'),s.getPropertyValue('--color-bg')],[s.getPropertyValue('--color-muted'),s.getPropertyValue('--color-surface')],[b.color,b.backgroundColor]];});
+  const ratios=pairs.map(pair=>Number(contrast(...pair).toFixed(2)));assert.ok(ratios.every(ratio=>ratio>=4.5));measurements.push({kind:'text_contrast',ratios,threshold:4.5});
+  assert.equal(await page.getByRole('link',{name:'Рекомендации',exact:true}).getAttribute('aria-current'),'page');
+
+  await dialogOpen();await screenshot('generation-confirmation');
+  assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Отмена');
+  for(const key of ['Tab','Tab','Shift+Tab']){await page.keyboard.press(key);const focus=await page.evaluate(()=>({inside:Boolean(document.activeElement.closest('dialog')),tag:document.activeElement.tagName,text:document.activeElement.textContent?.slice(0,50)}));assert.ok(focus.inside,JSON.stringify({key,...focus}));}
+  await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').isVisible(),false);assert.match(await page.evaluate(()=>document.activeElement.textContent),/Подобрать фильмы/);assert.equal(openaiCalls(),0);check('empty → confirmation/Escape/focus restore: zero provider calls');
+  control({delay:1000});await dialogOpen();await page.getByRole('button',{name:'Да, подобрать',exact:true}).dblclick();
+  await page.locator('.selection-loading').waitFor();const firstRequest=posts.at(-1);assert.ok(firstRequest?.request_id);
+  const duplicate=await page.request.post(base+'/api/recommendations/generate',{data:firstRequest});assert.equal(duplicate.status(),409);
+  await page.reload();await until(async()=> (await state()).generation.state==='saved','generation survives reload');await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();
+  assert.equal(openaiCalls(),2);let first=await state();assert.equal(first.batch.movies.length,5);const firstId=first.batch.result_id;
+  await screenshot('recommendations-desktop');
+  const mobileCapture=await browser.newContext({viewport:{width:375,height:1000}}),mobilePage=await mobileCapture.newPage();
+  await mobilePage.goto(base+'/');await mobilePage.waitForLoadState('networkidle');await mobilePage.evaluate(()=>document.fonts.ready);await mobilePage.screenshot({path:join(output,'recommendations-mobile.png')});await mobileCapture.close();await page.getByRole('button',{name:`Выбрать ${first.batch.movies[1].title}`,exact:true}).click();assert.equal(openaiCalls(),2);
+  const replay=await page.request.post(base+'/api/recommendations/generate',{data:firstRequest});assert.equal(replay.status(),200);assert.equal(openaiCalls(),2);check('two mocked OpenAI stages; double click/concurrent POST/reload/replay never pay again');
+  const rejection=first.batch.movies[4];await page.getByRole('button',{name:`Выбрать ${rejection.title}`,exact:true}).click();await page.getByRole('button',{name:'Неинтересно',exact:true}).click();
+  await until(async()=> (await state()).batch.movies.length===4,'rejection removes active film');
+  database(db=>{const row=db.prepare('SELECT watched,rating_100,not_interested FROM user_movies WHERE movie_id=?').get(rejection.movie_id);assert.deepEqual(row,{watched:0,rating_100:null,not_interested:1});});
+  await page.getByRole('button',{name:'Отменить',exact:true}).click();await until(async()=> (await state()).batch.movies.length===5,'undo restores active film');
+  database(db=>assert.equal(db.prepare('SELECT rejected FROM recommendations WHERE movie_id=?').get(rejection.movie_id).rejected,1));assert.equal(openaiCalls(),2);check('reject/undo keeps rating/view/history and does not generate');
+  const watched=[];
+  for(const [index,value] of [[0,90],[1,null],[2,0]]) {
+    const movie=first.batch.movies[index];await go('/');await page.getByRole('button',{name:`Выбрать ${movie.title}`,exact:true}).click();await page.getByRole('button',{name:'Посмотрел',exact:true}).click();
+    await page.waitForURL(base+`/rate?movie_id=${movie.movie_id}`);await rating().waitFor();
+    database(db=>assert.equal(db.prepare('SELECT watched FROM user_movies WHERE movie_id=?').get(movie.movie_id)?.watched??0,0));
+    if(value!==null)await rating().fill(String(value));else assert.equal(await rating().inputValue(),'');
+    const beforeCount=database(db=>db.prepare('SELECT count(*) n FROM user_movies WHERE rating_100 IS NOT NULL').get().n);
+    await page.getByRole('button',{name:'Подтвердить просмотр',exact:true}).click();await page.getByRole('status').filter({hasText:'Просмотр сохранён.'}).waitFor();
+    database(db=>{assert.equal(db.prepare('SELECT watched FROM user_movies WHERE movie_id=?').get(movie.movie_id).watched,1);assert.equal(db.prepare('SELECT rating_100 FROM user_movies WHERE movie_id=?').get(movie.movie_id).rating_100,value);assert.equal(db.prepare('SELECT count(*) n FROM user_movies WHERE rating_100 IS NOT NULL').get().n,beforeCount+(value===null?0:1));});
+    watched.push(movie);await page.getByRole('link',{name:'Вернуться к рекомендациям →',exact:true}).click();await page.waitForURL(base+'/');await until(async()=>!(await state()).batch.movies.some(row=>row.movie_id===movie.movie_id),'watched removed');
+  }
+  assert.equal(openaiCalls(),2);check('recommendations → rate deep link → watched 90 / NULL / real 0 → active exclusions');
+  await go(`/library?movie_id=${watched[0].movie_id}`);await rating().waitFor();await saveRating(40);await clearRating();
+  await go('/library?movie_id=1');await rating().waitFor();await saveRating(90);await saveRating(40);await clearRating();
+  check('library 90→40→NULL; snapshot rating cleared separately from a newly added/cleared rating');
+  const readStart=reads.length;await go('/library');await libraryReady();assert.equal(await page.locator('.library-grid>li').count(),25);
+  const initialReads=reads.slice(readStart);assert.equal(initialReads.filter(url=>new URL(url).pathname==='/api/library').length,2);assert.equal(initialReads.filter(url=>/\/api\/library\/\d+/.test(url)).length,0);
+  measurements.push({kind:'library',initial_list_reads:2,detail_reads:0,page_size:25});await screenshot('library-desktop');
+  const all=await (await page.request.get(base+'/api/library?limit=25')).json();const ids=new Set();for(let i=1;i<=all.total_pages;i++){const data=await(await page.request.get(base+`/api/library?page=${i}&limit=25`)).json();for(const item of data.items){assert.ok(!ids.has(item.movie_id));ids.add(item.movie_id);}}assert.equal(ids.size,all.total);
+  await page.getByRole('textbox',{name:'Название фильма',exact:true}).fill('FAVOURITE');await page.getByRole('button',{name:'Найти',exact:true}).click();await page.waitForURL(/q=FAVOURITE/);await libraryReady();assert.equal(await page.locator('.library-card').count(),1);await page.getByRole('button',{name:'Очистить поиск',exact:true}).click();await until(()=>new URL(page.url()).searchParams.get('q')===null,'cleared local query');await libraryReady();
+  await page.getByRole('textbox',{name:'Название фильма',exact:true}).fill('Кинокадр');await page.getByRole('button',{name:'Найти',exact:true}).click();await page.waitForURL(/q=/);await libraryReady();
+  for(const sort of ['rating_asc','rating_desc','added_asc','added_desc']){await page.getByRole('combobox').selectOption(sort);await until(async()=>new URL(page.url()).searchParams.get('sort')===(sort==='added_desc'?null:sort),'sort URL');await libraryReady();}
+  await page.getByRole('button',{name:'Без оценки',exact:true}).click();await page.waitForURL(/rated=false/);await libraryReady();await page.reload();await libraryReady();assert.match(page.url(),/rated=false/);
+  await page.goBack();await page.goForward();await libraryReady();check('all records accessible by 25-item pages; Cyrillic search, four sorts, filters, URL/reload/Back/Forward');
+  await go('/library?q=Кинокадр&sort=rating_desc&page=8');await libraryReady();
+  await page.locator('.library-card').first().click();await rating().waitFor();await saveRating(100);
+  await page.getByRole('button',{name:'← К моей библиотеке'}).click();await libraryReady();assert.equal(new URL(page.url()).searchParams.get('page'),'8');assert.equal(new URL(page.url()).searchParams.get('sort'),'rating_desc');
+  const storedY=await page.evaluate(()=>JSON.parse(Object.entries(sessionStorage).find(([key])=>key.endsWith('page=8'))[1]).y);await until(async()=>Math.abs((await page.evaluate(()=>scrollY))-storedY)<5,'restored collection scroll');check('page 8/sort/search and actual saved scroll survive moving a rated film');
+  let tail=await(await page.request.get(base+'/api/library?rated=false&limit=25')).json();const lastPage=tail.total_pages;
+  tail=await(await page.request.get(base+`/api/library?rated=false&limit=25&page=${lastPage}`)).json();
+  for(const film of tail.items.slice(0,-1))await page.request.patch(base+`/api/library/${film.movie_id}/rating`,{data:{rating_100:30}});
+  await go(`/library?rated=false&page=${lastPage}`);await libraryReady();await page.locator('.library-card').first().click();await rating().waitFor();await saveRating(85);await page.getByRole('button',{name:'← К моей библиотеке'}).click();await libraryReady();assert.equal(new URL(page.url()).searchParams.get('page'),String(lastPage-1));check('rating removes last filtered page and corrects URL without dropping filters');
+  await go('/library');await libraryReady();let releasePage,pageRequested=false;const pageGate=new Promise(resolve=>{releasePage=resolve;});
+  await page.route('**/api/library?*',async route=>{if(new URL(route.request().url()).searchParams.get('page')==='2'){pageRequested=true;await pageGate;}await route.continue();});
+  await page.getByRole('button',{name:'Далее',exact:true}).click();await until(()=>pageRequested,'delayed page request');await page.getByRole('button',{name:'С оценкой',exact:true}).click();await page.waitForURL(/rated=true/);await libraryReady();releasePage();await page.unrouteAll({behavior:'wait'});assert.equal(new URL(page.url()).searchParams.get('page'),null);assert.ok(!(await page.locator('.library-grid').innerText()).includes('Без оценки'));check('delayed page cannot overwrite a newer filter');
+  // Error recovery after a real successful PATCH. Only the following GET is interrupted.
+  await go(`/library?movie_id=${watched[0].movie_id}`);await rating().waitFor();let interrupt=false;
+  await page.route(`**/api/library/${watched[0].movie_id}/rating`,async route=>{interrupt=true;await route.continue();});
+  await page.route(`**/api/library/${watched[0].movie_id}`,async route=>{if(interrupt){interrupt=false;await route.abort('failed');}else await route.continue();});
+  await rating().fill('85');await page.getByRole('button',{name:'Сохранить оценку',exact:true}).click();await alerts().filter({hasText:'Операция выполнена'}).waitFor();
+  await page.unrouteAll({behavior:'wait'});await page.getByRole('button',{name:'Перечитать фильм'}).click();await until(async()=>await rating().inputValue()==='85','GET-only write recovery');check('successful PATCH + lost GET → explicit read recovery, saved 85 retained');
+  // A reused detail controller must gate editing while a fresh read is pending.
+  await page.getByRole('button',{name:'← К моей библиотеке'}).click();await libraryReady();
+  await page.request.patch(base+`/api/library/${watched[0].movie_id}/rating`,{data:{rating_100:21}});
+  let releaseDetail, detailRequested=false;const detailGate=new Promise(resolve=>{releaseDetail=resolve;});
+  await page.route(`**/api/library/${watched[0].movie_id}`,async route=>{detailRequested=true;await detailGate;await route.continue();});
+  await page.locator(`#library-movie-${watched[0].movie_id}`).click();await until(()=>detailRequested,'fresh detail request');
+  const staleEditor=await page.getByRole('button',{name:'Сохранить оценку',exact:true}).isVisible();releaseDetail();await page.unrouteAll({behavior:'wait'});
+  assert.equal(staleEditor,false,'Reopening the same movie must not expose an editable stale rating before GET completes');
+  await until(async()=>await rating().inputValue()==='21','fresh grade after reopening');check('same-film return gates stale editor until fresh GET completes');
+  await page.route(`**/api/library/${watched[0].movie_id}/rating`,route=>route.fulfill({status:500,json:{error:'library_unavailable'}}));
+  await rating().fill('55');await page.getByRole('button',{name:'Сохранить оценку',exact:true}).click();await alerts().first().waitFor();assert.equal(await rating().inputValue(),'55');database(db=>assert.equal(db.prepare('SELECT rating_100 FROM user_movies WHERE movie_id=?').get(watched[0].movie_id).rating_100,21));
+  await page.unrouteAll({behavior:'wait'});await saveRating(85);check('failed rating preserves draft/server value and explicit retry succeeds');
+
+  await go('/');const oldBatch=(await state()).batch.result_id;const paidBeforeFailure=openaiCalls();await generate({round:2,mode:'openai_error'},502);assert.equal(openaiCalls(),paidBeforeFailure+1);assert.equal((await state()).batch.result_id,oldBatch);await screenshot('generation-error');
+  await page.getByRole('button',{name:'Проверить состояние'}).click();await until(async()=>await page.getByRole('button',{name:'Ещё рекомендации',exact:true}).isEnabled(),'failed generation ready for explicit action');
+  for(const mode of ['invalid','refusal','incomplete','no_candidates']){const n=openaiCalls();await generate({round:2,mode},mode==='no_candidates'?422:502);assert.equal(openaiCalls(),n+1);assert.equal((await state()).batch.result_id,oldBatch);await page.getByRole('button',{name:'Проверить состояние'}).click();}
+  check('provider error, malformed/refused output and no candidates preserve previous batch without automatic retry');
+  control({round:2,delay:600});const beforeNew=openaiCalls();await dialogOpen();const secondResponse=page.waitForResponse(r=>r.url()===base+'/api/recommendations/generate'&&r.request().method()==='POST');await page.getByRole('button',{name:'Да, подобрать'}).click();await page.locator('.selection-loading').waitFor();assert.ok(await page.locator('.spotlight').isVisible());assert.equal((await secondResponse).status(),201);await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();assert.equal(openaiCalls(),beforeNew+2);
+  const second=(await state()).batch;assert.notEqual(second.result_id,firstId);database(db=>assert.equal(db.prepare('SELECT count(*) n FROM recommendations WHERE result_id=?').get(firstId).n,5));check('second saved batch preserves first history and keeps previous screen during loading');
+  // Fail only the final transaction, after providers and durable preparation succeeded.
+  database(db=>db.exec("CREATE TRIGGER qa_fail_save BEFORE INSERT ON recommendations BEGIN SELECT RAISE(ABORT,'qa save failure'); END"));const countBefore=database(db=>db.prepare('SELECT count(*) n FROM movies').get().n);
+  await generate({round:3},500);await page.getByRole('button',{name:'Повторить сохранение без AI'}).waitFor();database(db=>{assert.equal(db.prepare('SELECT count(*) n FROM movies').get().n,countBefore);db.exec('DROP TRIGGER qa_fail_save');});
+  const paidBeforeRecovery=openaiCalls();await page.getByRole('button',{name:'Повторить сохранение без AI'}).click();await page.getByRole('status').filter({hasText:'Подборка сохранена. Новых запросов AI не было.'}).waitFor();assert.equal(openaiCalls(),paidBeforeRecovery);assert.equal((await state()).batch.movies.length,5);check('SQL rollback + durable save_only=1 recovery without OpenAI/TMDB');
+  // A backup path failure must happen before payment and leave the current batch untouched.
+  const backups=join(fixture.dir,'backups'), held=join(fixture.dir,'backups-held');if(existsSync(backups))renameSync(backups,held);writeFileSync(backups,'qa blocks backup directory');
+  const noPayment=openaiCalls(), stableBatch=(await state()).batch.result_id;
+  try { await generate({round:4},500);assert.equal(openaiCalls(),noPayment);assert.equal((await state()).batch.result_id,stableBatch); }
+  finally {rmSync(backups);if(existsSync(held))renameSync(held,backups);}
+  await page.getByRole('button',{name:'Проверить состояние'}).click();check('backup failure stops before payment');
+  // Browser timeout presentation; the real deadline/lock is exercised separately by node:test.
+  await page.route('**/api/recommendations/generate',route=>route.fulfill({status:504,json:{error:'generation_timeout',message:'Время ожидания подбора истекло. Автоматического повтора нет.'}}));
+  const beforeTimeout=openaiCalls();await generate({round:4},504);assert.equal(openaiCalls(),beforeTimeout);await page.unrouteAll({behavior:'wait'});await page.getByRole('button',{name:'Проверить состояние'}).click();check('timeout UI preserves batch; no hidden retry (HTTP simulation; deadline covered by service test)');
+  // Explicit catalog/search cases use the actual API and mock provider.
+  await go('/rate');const query=page.getByPlaceholder('Какой фильм вы посмотрели?');
+  await query.fill('variants');await page.getByRole('spinbutton',{name:'Год необязательно'}).fill('2020');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990002').waitFor();assert.equal(await page.locator('.rate-result').count(),1);
+  await query.fill('variants');await page.getByRole('spinbutton',{name:'Год необязательно'}).fill('');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990001').waitFor();assert.equal(await page.locator('.rate-result').count(),2);
+  await query.fill('duplicate');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990004').click();await page.locator('.rate-duplicates').waitFor();assert.match(await page.locator('.rate-duplicates').innerText(),/Legacy Duplicate/);
+  await query.fill('empty');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.getByRole('heading',{name:'Фильм не найден',exact:true}).waitFor();
+  await query.fill('error');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await alerts().first().waitFor();
+  await query.fill('extra');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990003').click();await rating().waitFor();
+  await rating().fill('100');await page.getByRole('button',{name:'Подтвердить просмотр',exact:true}).click();await page.getByRole('status').filter({hasText:'Просмотр сохранён.'}).waitFor();
+  const savedExtra=database(db=>db.prepare('SELECT m.id,u.updated_at FROM movies m JOIN user_movies u ON u.movie_id=m.id WHERE tmdb_id=990003').get());
+  await saveRating(100);database(db=>assert.equal(db.prepare('SELECT updated_at FROM user_movies WHERE movie_id=?').get(savedExtra.id).updated_at,savedExtra.updated_at));
+  await screenshot('rate-desktop');check('title/year/versions, empty/error TMDB, possible_duplicate, watch 100 and unchanged timestamps');
+  // Ten final differences from the snapshot: no automatic profile generation.
+  database(db=>{for(let id=4;id<14;id++)db.prepare("UPDATE user_movies SET rating_100=100,rating_source='manual' WHERE movie_id=?").run(id);});
+  const countAtRefresh=openaiCalls();assert.equal((await state()).readiness.profile_refresh.status,'refresh_recommended');await go('/');await page.getByText('Профиль вкуса стоит обновить.',{exact:false}).waitFor();assert.equal(openaiCalls(),countAtRefresh);check('ten rating differences recommend refresh without regenerating profile');
+  database(db=>{
+    assert.deepEqual(db.prepare('SELECT * FROM taste_profile').get(),fixture.profile);assert.deepEqual(db.prepare('SELECT * FROM movies WHERE id=1').get(),fixture.importedMovie);
+    const row=db.prepare('SELECT * FROM user_movies WHERE movie_id=1').get();for(const key of ['watched','watched_at','original_rating_stars','letterboxd_date','letterboxd_rating_date','not_interested','created_at'])assert.equal(row[key],fixture.imported[key],key);
+    assert.equal(db.pragma('integrity_check',{simple:true}),'ok');assert.deepEqual(db.pragma('foreign_key_check'),[]);
+  });check('synthetic Letterboxd/profile/history preserved; SQLite integrity/FK pass');
+  // Same app and stored rows, at each width; no stateful production fixtures.
+  for(const width of [375,430,768,1024,1440]){
+    await page.setViewportSize({width,height:1000});await page.emulateMedia({reducedMotion:'reduce'});
+    await go('/');await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    if(width===375)await screenshot('recommendations-mobile-missing-images');
+    await go(`/rate?movie_id=${watched[0].movie_id}`);await rating().waitFor();await page.getByRole('slider').focus();await page.keyboard.press('Home');assert.equal(await rating().inputValue(),'0');await page.keyboard.press('End');assert.equal(await rating().inputValue(),'100');await page.keyboard.press('ArrowLeft');assert.equal(await rating().inputValue(),'99');
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));if(width===375)await screenshot('rate-mobile');
+    await go('/library');await libraryReady();assert.equal(await page.locator('.library-grid>li').count(),25);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    if(width===375)await screenshot('library-mobile');
+    await go('/library?movie_id=11');await rating().waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));if(width===375)await screenshot('library-details-mobile');
+    measurements.push({width,overflow:false,keyboard_slider:true,reduced_motion:true});
+  }
+  await page.setViewportSize({width:375,height:932});await go('/library?movie_id=11');await rating().waitFor();
+  await page.addStyleTag({content:'.library-editor .editor-film h2 {font-size:38px} .editor-overview p {font-size:22px} .field-help {font-size:18px}'});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));check('enlarged long-title/detail text stays readable without horizontal overflow');
+  const touch=await browser.newContext({viewport:{width:430,height:932},isMobile:true,hasTouch:true});const phone=await touch.newPage();
+  await phone.goto(base+`/library?movie_id=${watched[0].movie_id}`);const slider=phone.getByRole('slider');await slider.waitFor();const box=await slider.boundingBox();await phone.touchscreen.tap(box.x+box.width*.5,box.y+box.height/2);assert.ok(Number(await phone.getByRole('spinbutton',{name:'Точное число'}).inputValue())>=45);await touch.close();check('five widths, long title/no poster, keyboard slider, reduced motion and touch draft');
+  await page.route('**/api/library?*',route=>route.fulfill({json:{items:[],total:0,page:1,limit:25,total_pages:0}}));await go('/library');await libraryReady();await page.getByRole('heading',{name:'Здесь будет ваша история кино',exact:true}).waitFor();await screenshot('library-empty');await page.unrouteAll({behavior:'wait'});check('empty library UI offers rating navigation (read-response simulation)');
+  const beforeRestart=openaiCalls(), resultId=(await state()).batch.result_id;await stop();await start();await go('/');await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();assert.equal((await state()).batch.result_id,resultId);assert.equal(openaiCalls(),beforeRestart);
+  assert.equal((await page.request.get(base+'/preview/recommendations')).status(),404);
+  for(const path of ['/api/health','/api/library','/api/library/1','/api/recommendations']){const r=await page.request.get(base+path);assert.equal(r.status(),200);assert.equal(r.headers()['cache-control'],'no-store');}
+  const bad=await page.request.patch(base+'/api/library/1/rating',{headers:{Origin:'null'},data:{rating_100:1}});assert.equal(bad.status(),403);assert.equal(database(db=>db.prepare('SELECT rating_100 FROM user_movies WHERE movie_id=1').get().rating_100),null);
+  assert.equal((await page.request.get(base+'/api/library?year=bad')).status(),400);check('production restart, saved batch, no payment, Origin/no-store/invalid parameters/preview 404');
+  assert.equal(errors.length,0,errors.join('\n'));report.mock_calls={openai:openaiCalls(),tmdb:calls('api.themoviedb.org')};report.status='passed';
+} catch(error) {
+  report.status='failed';report.failure=error.message;
+  if(page)try{await screenshot('failure',true);}catch{}
+  process.exitCode=1;console.error(error);
+} finally {
+  if(browser)await browser.close();await stop();
+  if(fixture)rmSync(fixture.dir,{recursive:true,force:true});rmSync(temp,{recursive:true,force:true});
+  try{assert.deepEqual(protectedState(),before);report.protected_data_unchanged=true;}catch(error){report.status='failed';report.protected_data_unchanged=false;process.exitCode=1;console.error(error);}
+  writeFileSync(join(output,'results.json'),JSON.stringify(report,null,2));console.log(`Acceptance ${report.status}: ${checks.length} checks. Evidence: ${output}`);
+}

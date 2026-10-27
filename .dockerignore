@@ -1,0 +1,28 @@
+# Allow only build inputs. Personal files, env, data, SSH and local dependencies
+# never enter the build context, even if they are untracked or newly created.
+**
+!package.json
+!package-lock.json
+!next.config.ts
+!next-env.d.ts
+!tsconfig.json
+!src/
+!src/**
+!migrations/
+!migrations/*.sql
+!scripts/
+!scripts/container-db.mjs
+!Dockerfile
+# Defense in depth for accidental files inside allowed source directories.
+**/.env*
+**/*.sqlite*
+**/*.db*
+**/*.csv
+**/*.bak
+**/*.pem
+**/*.key
+**/*.lock
+**/.recommendation-runs/**
+**/.ssh/**
+**/._*
+**/.DS_Store

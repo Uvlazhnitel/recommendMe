@@ -160,6 +160,19 @@ test('exclusive lock across processes, same-ID conflict and interrupted journal 
     assert.equal(recommendationState({open:f.open,config}).generation.state,'interrupted'); assert.ok(statSync(`${f.path}.recommendations.lock`));
   } finally { f.cleanup(); }
 });
+test('a stale lock with a reused container PID is interrupted and is never removed or resumed', async () => {
+  const f = fixture(), id = randomUUID(), h = mockProvider();
+  try {
+    // A rapid restart can reuse a PID less than one second after the old lock.
+    const beforeProcessStart = new Date(Date.now() - process.uptime() * 1000 - 100).toISOString();
+    writeFileSync(`${f.path}.recommendations.lock`, JSON.stringify({ pid: process.pid, request_id: id, started_at: beforeProcessStart }));
+    assert.equal(runStore(f.path).ownerAlive(), false);
+    assert.equal(recommendationState({ open: f.open, config }).generation.state, 'interrupted');
+    await assert.rejects(generateRecommendationBatch(id, { open: f.open, config, fetch: h.fetch }), errorCode('generation_busy'));
+    assert.equal(h.calls.length, 0);
+    assert.ok(statSync(`${f.path}.recommendations.lock`));
+  } finally { f.cleanup(); }
+});
 test('deadline aborts fetch but keeps lock until network settles, then never retries the failed request', async () => {
   const f = fixture(), id = randomUUID(); let aborted = false, lockedWhileSettling = false, calls = 0;
   try {

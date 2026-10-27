@@ -15,6 +15,11 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
   const [recoveryMovieId, setRecoveryMovieId] = useState<number | null>(null), [watchConfirmed, setWatchConfirmed] = useState(false);
   const [addingId, setAddingId] = useState<number | null>(null);
   const [loadedInitialId, setLoadedInitialId] = useState<number | undefined>();
+  const [initialSelection, setInitialSelection] = useState(initialMovieId);
+  // Closing and reopening the same ID is a new read, not a completed old selection.
+  if (initialSelection !== initialMovieId) {
+    setInitialSelection(initialMovieId); setLoadedInitialId(undefined);
+  }
   const detailRun = useRef(0), actionLock = useRef(false), alive = useRef(false);
   const detailAbort = useRef<AbortController | null>(null), saved = useRef(onSaved);
   const busy = pending !== null;

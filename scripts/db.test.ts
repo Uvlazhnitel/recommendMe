@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -15,6 +15,21 @@ function run(source: string, databasePath: string) {
   return result;
 }
 const databaseImport = `import { openDatabase } from './src/lib/db.ts';`;
+
+test('read-only health probe neither creates a missing file nor changes an existing schema', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'movie-health-'));
+  const probe = `import { checkDatabase } from './src/lib/db.ts'; checkDatabase({ readonly: true });`;
+  try {
+    const missing = join(directory, 'absent', 'test.sqlite');
+    assert.notEqual(run(probe, missing).status, 0);
+    assert.equal(existsSync(join(directory, 'absent')), false);
+    const path = join(directory, 'test.sqlite');
+    assert.equal(run(`${databaseImport} const db = openDatabase(); db.pragma('user_version=3'); db.close();`, path).status, 0);
+    const before = readFileSync(path);
+    assert.equal(run(probe, path).status, 0);
+    assert.deepEqual(readFileSync(path), before);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('SQLite preserves data across independent processes; connection creates no tables', () => {
   const directory = mkdtempSync(join(tmpdir(), 'movie-db-'));

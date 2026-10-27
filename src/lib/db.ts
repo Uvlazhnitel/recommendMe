@@ -20,8 +20,8 @@ export function openDatabase(options: { readonly?: boolean } = {}) {
   }
 }
 
-export function checkDatabase() {
-  const database = openDatabase();
+export function checkDatabase(options: { readonly?: boolean } = {}) {
+  const database = openDatabase(options);
   try {
     database.prepare('SELECT 1').get();
   } finally {

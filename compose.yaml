@@ -1,0 +1,40 @@
+services:
+  app:
+    build: .
+    image: ${RECOMMENDME_IMAGE:-recommendme:local}
+    # A fixed per-project name intentionally prevents scaling this SQLite app.
+    container_name: ${COMPOSE_PROJECT_NAME:?Set a unique Compose project name}-app
+    init: true
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
+    stop_grace_period: 16m
+    env_file:
+      - ${APP_ENV_FILE:?Set the absolute path to a private runtime env file}
+    environment:
+      DATABASE_PATH: /app/data/movies.sqlite
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      BACKUP_DIR: /app/backups
+    ports:
+      - "127.0.0.1:${APP_PORT:-45151}:3000"
+    volumes:
+      - type: bind
+        source: ${RECOMMENDME_DATA_DIR:?Set an absolute isolated data directory}
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RECOMMENDME_BACKUP_DIR:?Set an absolute separate backup directory}
+        target: /app/backups
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /app/.next/cache:mode=1777,size=128m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
