@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
-import Workbench from '../workbench';
-import { PageHeader } from '../components/ui';
+import { Suspense } from 'react';
+import { LibraryWorkbench } from '../library-workbench';
+import { LoadingState } from '../components/ui';
 
-export const metadata: Metadata = { title: 'Библиотека' };
+export const metadata: Metadata = { title: 'Моя библиотека' };
 export default function LibraryPage() {
-  return <><PageHeader title="Библиотека" description="Просмотренные фильмы и ваши оценки. История, которую стоит сохранить." /><Workbench mode="library" /></>;
+  return <Suspense fallback={<LoadingState>Загрузка библиотеки…</LoadingState>}><LibraryWorkbench /></Suspense>;
 }

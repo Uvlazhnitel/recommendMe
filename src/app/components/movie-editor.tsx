@@ -1,21 +1,23 @@
 'use client';
 
 import type { ReactNode, Ref } from 'react';
-import type { useWorkbench } from '../use-workbench';
+import type { MovieEditorModel } from '../use-movie-editor';
 import { ratingDraft } from '../rating-draft';
 import { MoviePoster } from './movie-poster';
 import { RatingControl } from './rating-control';
 import { Button, LoadingState } from './ui';
 
-export function MovieEditor({ model: m, enhanced = false, headingRef, feedback }: { model: ReturnType<typeof useWorkbench>; enhanced?: boolean; headingRef?: Ref<HTMLHeadingElement>; feedback?: ReactNode }) {
+export function MovieEditor({ model: m, enhanced = false, collection = false, headingRef, feedback }: { model: MovieEditorModel; enhanced?: boolean; collection?: boolean; headingRef?: Ref<HTMLHeadingElement>; feedback?: ReactNode }) {
   const film = m.selected;
   if (m.selecting || m.pending === 'select') return <LoadingState>Загрузка фильма…</LoadingState>;
   if (!film) return <section className="selection-hint">{enhanced ? <><h2>Ваше впечатление о фильме</h2><p>Выберите фильм в результатах. Здесь появятся детали и шкала оценки.</p></> : <p>Выберите фильм, чтобы открыть детали и сохранить оценку.</p>}</section>;
   const draft = ratingDraft(m.score);
-  const posterAndTitle = <div className="editor-film"><MoviePoster path={film.poster_path} title={film.title} sizes={enhanced ? '(max-width: 767px) 88px, (max-width: 1023px) 120px, 96px' : '(max-width: 600px) 80px, 120px'} />
+  const posterAndTitle = <div className="editor-film"><MoviePoster path={film.poster_path} title={film.title} fallbackTitle={collection} sizes={collection ? '(max-width: 767px) 100px, 180px' : enhanced ? '(max-width: 767px) 88px, (max-width: 1023px) 120px, 96px' : '(max-width: 600px) 80px, 120px'} />
     <div><p className="muted">{[film.year ?? 'Год неизвестен', ...(enhanced ? [film.runtime_minutes ? `${film.runtime_minutes} мин` : null] : [])].filter(Boolean).join(' · ')}</p>
       <h2 ref={headingRef} tabIndex={enhanced ? -1 : undefined}>{film.title}</h2>
+      {collection && film.original_title && film.original_title !== film.title ? <p className="editor-original-title">{film.original_title}</p> : null}
       {enhanced && film.genres?.length ? <p className="editor-genres">{film.genres.map(genre => genre.name).join(' · ')}</p> : null}
+      {collection && film.directors?.length ? <p className="muted">{film.directors.map(person => person.name).join(', ')}</p> : null}
       <p className="watch-status">{film.watched ? 'Уже просмотрен' : enhanced ? 'Не просмотрен' : 'Просмотр не отмечен'}</p>
       <p className="current-score">{enhanced ? <span>Сохранено: </span> : null}{film.rating_100 === null ? 'Без оценки' : <><strong>{film.rating_100}</strong><span> / 100</span></>}</p>
       <p className="muted">{film.rating_source === 'letterboxd' ? 'Оценка из Letterboxd' : film.rating_source === 'manual' ? 'Ваша оценка' : 'Оценка ещё не назначена'}</p>
@@ -23,7 +25,7 @@ export function MovieEditor({ model: m, enhanced = false, headingRef, feedback }
   </div>;
   const ratingFields = enhanced ? <RatingControl value={m.score} onChange={m.setScore} watched={film.watched} /> :
     <label>{film.watched ? 'Новая оценка' : <>Оценка просмотра <span className="muted">(необязательно)</span></>}<span className="input-with-suffix"><input name={film.watched ? 'edit-rating' : 'watch-rating'} type="number" min={0} max={100} step={1} required={film.watched} value={m.score} onChange={e => m.setScore(e.target.value)} /><span>/ 100</span></span></label>;
-  return <section className={`movie-editor ${enhanced ? 'rate-editor' : ''}`} aria-label="Выбранный фильм" aria-busy={m.busy}>
+  return <section className={`movie-editor ${enhanced ? 'rate-editor' : ''}${collection ? ' library-editor' : ''}`} aria-label="Выбранный фильм" aria-busy={m.busy}>
     {posterAndTitle}
     {!enhanced && film.overview ? <p className="film-overview">{film.overview}</p> : null}
     <fieldset disabled={m.busy}>
@@ -43,5 +45,6 @@ export function MovieEditor({ model: m, enhanced = false, headingRef, feedback }
       </div>
     </fieldset>
     {enhanced && film.overview ? <div className="editor-overview"><h3>О фильме</h3><p>{film.overview}</p></div> : null}
+    {collection && !film.overview ? <div className="editor-overview"><h3>О фильме</h3><p>Описание пока отсутствует. Просмотр и оценка сохранены в вашей библиотеке.</p></div> : null}
   </section>;
 }
