@@ -19,6 +19,8 @@
 
 Подфаза 5.2: настоящая библиотека и серверные настройки перенесены в отдельную основную установку `$HOME/apps/recommendme/`. Исходная schema 5 сохранена без миграций; локальный источник/CSV/.env.local не менялись. Сервер — единственная рабочая копия для дальнейших оценок. Частный Tailscale Serve HTTPS на 12443 проксирует loopback 45151; существующие Serve/Funnel-маршруты не изменены. Restore поддерживает явный --relocate-from: проверяет исходный canonical path по manifest и переименовывает только хеш-каталог journal, сохраняя JSON/request_id/result_id. Обычный restore без флага остаётся строгим. Приёмка: 198 тестов, перенос/проверка всех таблиц, offline replay без сети/ключей, HTTPS/Origin и restart/recreate; новых OpenAI/TMDB API-запросов 0. Эксплуатация и backup описаны в docs/HOMESERVER_DEPLOYMENT.md.
 
+Обновление 2026-10-28: на homeserver развёрнуты рецензии и Taste Context v2, образ `recommendme:taste-context-v2-f470552`. После остановки app и проверенного backup явно применена миграция 6. Все прежние поля четырёх таблиц, профиль, журнал и настройки сохранились; подробности и backup — в `docs/HOMESERVER_DEPLOYMENT.md`.
+
 ## 2. Исходные CSV Letterboxd
 
 Файлы владельца: `watched(6).csv` и `ratings(6).csv`.
