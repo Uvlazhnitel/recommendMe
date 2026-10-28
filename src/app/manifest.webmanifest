@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "recommendMe — персональное кино",
+  "short_name": "recommendMe",
+  "description": "Персональные рекомендации фильмов под твой вкус и настроение",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101113",
+  "theme_color": "#101113",
+  "icons": [
+    { "src": "/icon1.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon2.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon2.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
