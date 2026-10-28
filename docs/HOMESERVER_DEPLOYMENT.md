@@ -1,5 +1,9 @@
 # recommendMe: изолированное развёртывание на homeserver
 
+## Публикация Candidates v2 — 2026-10-28
+
+По отдельному разрешению владельца коммит `9d29247` опубликован в `origin/feature/candidates-v2` и развёрнут на homeserver. Образ `recommendme:candidates-v2-9d29247` собран до остановки app; production build успешен. Миграций нет, схема 6 сохранена. Проверенный backup: `/app/backups/snapshot-2026-10-28T11-39-59.716Z-7e812e2d-0622-4b0d-837b-9a2c67cedb6a`. Прежние исходники/Compose/образ сохранены для отката. Fingerprints четырёх таблиц, journal, locks, модели и ключей совпали до/после. Smoke: 830 просмотров, 519 оценок/311 без оценки, 4 видимых/1 скрытый фильм последней подборки; три страницы, 13 assets, Origin 403 и частный HTTPS health — успешно. Реальные TMDB/OpenAI-запросы не выполнялись. Предыдущие ограничения на push/deploy относились к реализации; эта операция явно разрешена владельцем. Main и PR не менялись.
+
 ## Обновление рецензий и Taste Context v2 — 2026-10-28
 
 Текущая production-версия — исходники `f4705528143c8d77457c16f7e40074edf4f47802` из `feature/taste-context-v2`, образ `recommendme:taste-context-v2-f470552`, image ID `sha256:daa2fa16a75c35c2440f7ffe253c8ef68e918d2accef352f1416f6f3af649891`. Путь `source/`, Compose project/container, частный HTTPS-адрес и bind mounts прежние. В `source/.release-commit` указан коммит приложения. В GitHub опубликована feature-ветка; `main` не менялся.
