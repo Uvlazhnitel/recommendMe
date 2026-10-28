@@ -6,6 +6,9 @@ import { examplePool, type ExampleSample } from './taste-examples';
 const emptyProfile: ProfileBody = { strong_preferences: [], negative_patterns: [], contrasts: [], uncertainties: [] };
 const intersects = (a: number[], b: number[]) => a.some(id => b.includes(id));
 const directors = (row: MovieCandidate) => row.directors?.map(person => person.id) ?? [];
+const metadataGroup = (row: MovieCandidate) => directors(row).length && row.genres.length
+  ? JSON.stringify([[...new Set(directors(row))].sort((a, b) => a - b), [...new Set(row.genres.map(g => g.id))].sort((a, b) => a - b)])
+  : `movie:${row.tmdb_id}`; // Missing facts do not prove two films are similar.
 const overlap = (a: number[], b: number[]) => [...new Set(a)].filter(id => b.includes(id)).length / (new Set([...a, ...b]).size || 1);
 const compare = (a: number[], b: number[]) => {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
@@ -64,7 +67,9 @@ export function selectVerifiedCandidates(candidates: MovieCandidate[], history: 
   const high = evidence.filter(row => row.example.rating_100 >= 80), low = evidence.filter(row => row.example.rating_100 <= 60);
   const facts = new Map(candidates.map(row => [row, { support: support(row, high), counterexample: support(row, low) !== 'none' }]));
   const selected: MovieCandidate[] = [];
+  const groups = new Map(candidates.map(row => [row, metadataGroup(row)])), represented = new Set<string>();
   const redundancy = (row: MovieCandidate) => ({
+    metadata_repeat: represented.has(groups.get(row)!),
     director_repeats: selected.filter(other => intersects(directors(row), directors(other))).length,
     max_genre_overlap: Math.max(0, ...selected.map(other => overlap(row.genres.map(g => g.id), other.genres.map(g => g.id)))),
   });
@@ -74,15 +79,15 @@ export function selectVerifiedCandidates(candidates: MovieCandidate[], history: 
   while (selected.length < 40 && selected.length < candidates.length) {
     const key = (row: MovieCandidate) => {
       const d = redundancy(row);
-      return [-supportOrder[facts.get(row)!.support], -Number(directors(row).length > 0), d.director_repeats,
+      return [Number(d.metadata_repeat), -supportOrder[facts.get(row)!.support], -Number(directors(row).length > 0), d.director_repeats,
         d.max_genre_overlap, -Number(row.source === 'both'), row.tmdb_id];
     };
     const row = candidates.filter(row => !selected.includes(row)).sort((a, b) => compare(key(a), key(b)))[0];
-    entries.push({ ...describe(row), selected: true, position: selected.length + 1 }); selected.push(row);
+    entries.push({ ...describe(row), selected: true, position: selected.length + 1 }); selected.push(row); represented.add(groups.get(row)!);
   }
   for (const row of [...candidates].sort((a, b) => a.tmdb_id - b.tmdb_id)) {
     if (!selected.includes(row)) entries.push({ ...describe(row), selected: false, position: null });
   }
-  return { candidates: selected, selection: { version: 2, criteria: ['support', 'director_data', 'director_repeats', 'max_genre_overlap', 'both_sources', 'tmdb_id'],
+  return { candidates: selected, selection: { version: 2, criteria: ['metadata_repeat', 'support', 'director_data', 'director_repeats', 'max_genre_overlap', 'both_sources', 'tmdb_id'],
     before: sourceCounts(candidates), after: sourceCounts(selected), excluded_count: candidates.length - selected.length, entries } };
 }

@@ -152,22 +152,22 @@ for (const n of [25, 40, 44, 55]) test(`candidate sizes 1–4: ${n} verified fil
   assert.equal(result.selection.excluded_count, Math.max(0, n - 40));
 });
 
-test('candidates 5/7: late useful TMDB alternatives replace four unsupported LLM entries, not the last four arrivals', () => {
+test('candidates 5/7: late TMDB alternatives survive and one unusual LLM group also receives a chance', () => {
   const f = candidatesFixture();
   try {
     const result = selection(f.candidates, readCandidateHistory(f.db));
     assert.deepEqual(baseline.audit44.excluded, [2016, 2017, 2018, 2019]);
-    assert.deepEqual(result.selection.entries.filter(row => !row.selected).map(row => row.tmdb_id), [1020, 1021, 1022, 1023]);
+    assert.deepEqual(result.selection.entries.filter(row => !row.selected).map(row => row.tmdb_id), [1019, 1021, 1022, 1023]);
     assert.deepEqual(result.selection.after, { llm: 20, tmdb: 20, both: 0 });
     assert.ok([2016, 2017, 2018, 2019].every(id => ids(result.candidates).includes(id)));
-    assert.ok(result.selection.entries.filter(row => !row.selected).every(row => row.support === 'none'));
+    assert.ok(result.selection.entries.filter(row => !row.selected).every(row => row.metadata_repeat));
   } finally { f.cleanup(); }
 });
 
 test('candidates 6: all 24 supported LLM entries survive weak TMDB alternatives without source quotas', () => {
   const f = candidatesFixture();
   try {
-    const rows = f.candidates.map(row => ({ ...row, ...(row.source === 'llm' ? { genres: metadata([16, 12]), directors: metadata([400]) } :
+    const rows = f.candidates.map(row => ({ ...row, ...(row.source === 'llm' ? { genres: metadata([16, 12, row.tmdb_id + 10000]), directors: metadata([400]) } :
       row.tmdb_id >= 2016 ? { genres: metadata([901]), directors: metadata([9999]) } : {}) }));
     assert.deepEqual(selection(rows, readCandidateHistory(f.db)).selection.after, { llm: 24, tmdb: 16, both: 0 });
   } finally { f.cleanup(); }
@@ -185,11 +185,11 @@ test('candidates 8: both-source identity is merged once by the existing verifier
   } finally { f.cleanup(); }
 });
 
-test('candidates 9: director redundancy breaks ties without displacing a better-supported film', () => {
+test('candidates 9: director redundancy breaks ties and a new group survives supported repeats', () => {
   const rows = Array.from({ length: 41 }, (_, i) => candidate(i + 1, { genres: metadata([1, 2]), directors: metadata(i === 40 ? [20] : [10]) }));
   assert.ok(ids(selection(rows).candidates).includes(41));
   const strong = history(100, { genres_json: JSON.stringify(metadata([1, 2])), directors_json: JSON.stringify(metadata([10])) });
-  assert.ok(!ids(selection(rows.map(row => row.tmdb_id === 41 ? { ...row, genres: metadata([9]) } : row), [strong]).candidates).includes(41));
+  assert.ok(ids(selection(rows.map(row => row.tmdb_id === 41 ? { ...row, genres: metadata([9]) } : row), [strong]).candidates).includes(41)); // A distinct group survives repeated supported metadata.
 });
 
 test('candidates 10: genre redundancy admits another direction but imposes no maximum per genre', () => {
@@ -243,7 +243,7 @@ test('both is a late tie-break, never a substitute for metadata support', () => 
   const rows = Array.from({ length: 41 }, (_, i) => candidate(i + 1, { genres: metadata([1]), directors: metadata([10]), source: i === 40 ? 'both' : 'llm' }));
   assert.ok(ids(selection(rows).candidates).includes(41));
   const past = [history(1, { directors_json: JSON.stringify(metadata([10])) })];
-  const unsupported = rows.map(row => row.tmdb_id === 41 ? { ...row, directors: metadata([900]) } : row);
+  const unsupported = rows.map(row => ({ ...row, genres: metadata([row.tmdb_id + 100]), ...(row.tmdb_id === 41 ? { directors: metadata([900]) } : {}) }));
   assert.ok(!ids(selection(unsupported, past).candidates).includes(41));
 });
 
