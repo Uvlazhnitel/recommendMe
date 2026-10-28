@@ -1,3 +1,5 @@
+import { readHomeSummary } from './home-summary';
+import { parsePreferences, samePreferences, reportPreferences, type RecommendationPreferences } from './recommendation-preferences';
 // Node-only orchestration. Existing candidate/ranking functions own every AI rule.
 import { setTimeout as delay } from 'node:timers/promises';
 import type Database from 'better-sqlite3';
@@ -52,17 +54,29 @@ export function recommendationState(dependencies: RecommendationDependencies = {
   const db = (dependencies.open ?? openDatabase)({ readonly: true });
   try {
     recommendationSchema(db);
-    return db.transaction(() => ({ status: 'ok' as const, batch: readRecommendationBatch(db), readiness: readiness(db, (dependencies.config ?? configuration)()), generation: publicGeneration(db) })).deferred();
+    return db.transaction(() => ({ status: 'ok' as const, batch: readRecommendationBatch(db), home: readHomeSummary(db), readiness: readiness(db, (dependencies.config ?? configuration)()), generation: publicGeneration(db) })).deferred();
   } finally { db.close(); }
 }
 
-export async function generateRecommendationBatch(requestId: string, dependencies: RecommendationDependencies = {}, options: { saveOnly?: boolean } = {}) {
+export async function generateRecommendationBatch(requestId: string, dependencies: RecommendationDependencies = {}, options: { saveOnly?: boolean; preferences?: RecommendationPreferences } = {}) {
   const open = dependencies.open ?? openDatabase, config = (dependencies.config ?? configuration)();
+  let preferences = parsePreferences(options.preferences);
+  const requested = options.preferences === undefined ? undefined : preferences;
+  const checkSnapshot = (existing: StoredRun | null) => {
+    if (!existing) return;
+    const prepared = existing.candidates && existing.ranking ? reportPreferences(existing.candidates, existing.ranking) : null;
+    const frozen = existing.preferences === undefined ? prepared : parsePreferences(existing.preferences);
+    if (prepared && frozen && !samePreferences(prepared, frozen)) throw new GenerationError('generation_state_unavailable', 409);
+    if (existing.preferences !== undefined && existing.candidates && existing.ranking && !prepared) throw new GenerationError('generation_state_unavailable', 409);
+    if (requested && !samePreferences(requested, frozen ?? parsePreferences(undefined))) throw new GenerationError('preferences_conflict', 409);
+    preferences = frozen ?? parsePreferences(undefined);
+  };
   const ro = open({ readonly: true });
   let store: ReturnType<typeof runStore>;
   try {
     recommendationSchema(ro); store = runStore(ro.name);
     const existing = store.read(requestId), resultId = existing?.result_id ?? existing?.ranking?.result_id;
+    checkSnapshot(existing);
     if (hasResult(ro, resultId)) return { status: 'ok' as const, replayed: true, saved_count: 0, batch: readRecommendationBatch(ro, resultId!), request_id: requestId };
     if (options.saveOnly && !existing) throw new GenerationError('saved_result_unavailable', 409);
     if (existing && !(['saving', 'save_failed'].includes(existing.stage) && existing.candidates && existing.ranking)) {
@@ -71,7 +85,7 @@ export async function generateRecommendationBatch(requestId: string, dependencie
     if (!existing) {
       const ready = readiness(ro, config);
       if (!ready.can_generate) throw new GenerationError(ready.reason!, ready.reason === 'configuration_missing' ? 503 : 409);
-      buildCandidateContext(ro); // Complete free context/size validation before any payment.
+      buildCandidateContext(ro, undefined, preferences); // Complete free context/size validation before any payment.
     }
   } finally { ro.close(); }
   const release = store!.acquire(requestId);
@@ -98,6 +112,7 @@ export async function generateRecommendationBatch(requestId: string, dependencie
   try {
     db = open();
     run = store!.read(requestId);
+    checkSnapshot(run);
     const existingId = run?.result_id ?? run?.ranking?.result_id;
     if (hasResult(db, existingId)) return { status: 'ok' as const, replayed: true, saved_count: 0, batch: readRecommendationBatch(db, existingId!), request_id: requestId };
     const recovering = run !== null;
@@ -108,16 +123,16 @@ export async function generateRecommendationBatch(requestId: string, dependencie
     checkDeadline();
     migrateDatabase(db);
     if (!run) {
-      run = { request_id: requestId, started_at: new Date().toISOString(), stage: 'starting', calls };
+      run = { request_id: requestId, started_at: new Date().toISOString(), stage: 'starting', calls, preferences };
       store!.write(run);
       run.stage = 'candidates'; store!.write(run);
-      const candidates = await generateCandidates(db, { live: true, ...config, openaiFetch: boundedFetch, tmdbFetch: boundedFetch, sleep: boundedSleep });
+      const candidates = await generateCandidates(db, { live: true, preferences, ...config, openaiFetch: boundedFetch, tmdbFetch: boundedFetch, sleep: boundedSleep });
       run.technical_usage = { candidates: candidates.mode === 'live' ? candidates.statistics : null };
       checkDeadline();
       if (candidates.mode !== 'live' || candidates.status !== 'ok') throw new GenerationError('candidates_failed', 502);
       if (!candidates.candidates.length) throw new GenerationError('no_candidates', 422);
       run.candidates = candidates; run.stage = 'ranking'; store!.write(run);
-      const ranking = await rankRecommendations(db, candidates, { live: true, save: false, apiKey: config.apiKey, model: config.model, fetch: boundedFetch });
+      const ranking = await rankRecommendations(db, candidates, { live: true, preferences, save: false, apiKey: config.apiKey, model: config.model, fetch: boundedFetch });
       checkDeadline();
       run.technical_usage = { ...run.technical_usage, ranking: ranking.statistics };
       if (ranking.status !== 'ok' || !ranking.recommendations.length || !ranking.result_id) throw new GenerationError('ranking_failed', 502);

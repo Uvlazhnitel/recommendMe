@@ -1,3 +1,4 @@
+import { reportPreferences, preferenceExclusion, parsePreferences } from './recommendation-preferences';
 import { saveEvaluation } from './evaluation-storage';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -53,6 +54,7 @@ export function recordRecommendations(db: Database.Database, candidateReport: un
   const parsed = parseCandidateReport(candidateReport), candidates = new Map(parsed.candidates.map(row => [row.tmdb_id, row]));
   if (request.tmdbIds !== undefined && request.result !== undefined) throw new Error('Choose TMDB IDs or a saved ranking result, not both.');
   const manual = request.tmdbIds !== undefined;
+  const preferences = manual ? null : reportPreferences(candidateReport, request.result);
   let resultId: string, recommendedAt: string, rows: { tmdb_id: number; why_fit: unknown; possible_mismatch: unknown; evidence: unknown[] }[];
   if (manual) {
     const ids = request.tmdbIds!;
@@ -88,7 +90,7 @@ export function recordRecommendations(db: Database.Database, candidateReport: un
     const history = readCandidateHistory(db), ratings = new Map(history.map(row => [row.id, row.rating_100]));
     for (const row of rows) {
       const movie = candidates.get(row.tmdb_id)!;
-      const reason = blockedReason({ id: movie.tmdb_id, title: movie.title, original_title: movie.original_title, year: movie.year }, history, now);
+      const reason = blockedReason({ id: movie.tmdb_id, title: movie.title, original_title: movie.original_title, year: movie.year }, history, now) || preferenceExclusion(movie, parsePreferences(preferences ?? undefined));
       if (reason) { report.skipped.push({ tmdb_id: movie.tmdb_id, reason }); continue; }
       if (!manual) {
         const snapshot = [...ratings].flatMap(([movie_id, rating_100]) => rating_100 === null ? [] : [{ movie_id, rating_100 }]);

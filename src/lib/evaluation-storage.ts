@@ -1,3 +1,4 @@
+import { reportPreferences } from './recommendation-preferences';
 import type Database from 'better-sqlite3';
 import { parseUsage } from './openai';
 
@@ -28,7 +29,8 @@ export function evaluationMetadata(candidateReport: unknown, result: unknown) {
   const sum = (a: number | null | undefined, b: number | null | undefined) => a != null && b != null ? a + b : null;
   const total = (u: ReturnType<typeof parseUsage>) => u?.total_tokens ?? sum(u?.input_tokens, u?.output_tokens);
   const a = candidates?.usage, b = ranking?.usage;
-  return { algorithm_id: candidates && ranking && candidates.algorithm_id === ranking.algorithm_id ? ranking.algorithm_id : 'unknown', candidates, ranking,
+  const preferences = reportPreferences(candidateReport, result);
+  return { ...(preferences ? { preferences } : {}), algorithm_id: candidates && ranking && candidates.algorithm_id === ranking.algorithm_id ? ranking.algorithm_id : 'unknown', candidates, ranking,
     totals: { input_tokens: sum(a?.input_tokens, b?.input_tokens), output_tokens: sum(a?.output_tokens, b?.output_tokens),
       total_tokens: sum(total(a ?? null), total(b ?? null)), cached_input_tokens: sum(a?.input_tokens_details?.cached_tokens, b?.input_tokens_details?.cached_tokens),
       reasoning_tokens: sum(a?.output_tokens_details?.reasoning_tokens, b?.output_tokens_details?.reasoning_tokens) } };

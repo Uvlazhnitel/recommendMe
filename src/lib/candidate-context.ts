@@ -1,3 +1,4 @@
+import { parsePreferences, customPreferences, preferenceGuidance, type RecommendationPreferences } from './recommendation-preferences';
 import type Database from 'better-sqlite3';
 import { buildTasteContext } from './taste-context';
 import { readTasteProfile } from './taste-profile';
@@ -85,15 +86,16 @@ export function prepareTasteInputs(db: Database.Database) {
   const profileRefresh = describeTasteRefresh(changes, taste?.fingerprint === saved.context_fingerprint, reviewDelta);
   return { saved, history, byId, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh, reviews, changedReviews, pool };
 }
-export function buildCandidateContext(db: Database.Database, maxBytes: number = CANDIDATE_LIMITS.input_bytes) {
+export function buildCandidateContext(db: Database.Database, maxBytes: number = CANDIDATE_LIMITS.input_bytes, preferences?: RecommendationPreferences) {
+  const wishes = parsePreferences(preferences), guidance = preferenceGuidance(wishes);
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid candidate input byte limit.');
   const { saved, history, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh, reviews, changedReviews } = prepareTasteInputs(db);
   const exclusions = history.filter(row => row.watched || row.not_interested || recentlyRecommended(row.last_recommended_at)).map(row => ({ title: row.title, year: row.release_year }));
   let descriptionLimit = 600, perGroup = 10, pairs = 6, includeExclusions = true;
-  const make = (includeReviews = true) => ({ profile, profile_evidence_movies: evidenceMovies, rating_changes: changes,
+  const make = (includeReviews = true) => ({ ...(customPreferences(wishes) ? { request_preferences: wishes } : {}), profile, profile_evidence_movies: evidenceMovies, rating_changes: changes,
     examples: [examples.filter(row => row.rating_100 >= 80), examples.filter(row => row.rating_100 <= 60)].flatMap(group => group.slice(0, perGroup).map(row => reviewExample(row, includeReviews ? reviews : new Map(), descriptionLimit, includeReviews ? changedReviews : new Set()))),
     contrasts: taste?.context.contrast_pairs.slice(0, pairs) ?? [], exclusions: includeExclusions ? exclusions : [] });
-  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify(value) }], text: { format: CANDIDATE_FORMAT } }), 'utf8');
+  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: SYSTEM_PROMPT + guidance }, { role: 'user', content: JSON.stringify(value) }], text: { format: CANDIDATE_FORMAT } }), 'utf8');
   while (requestBytes(make(false)) > maxBytes) {
     if (descriptionLimit > 0) descriptionLimit = descriptionLimit > 150 ? Math.floor(descriptionLimit / 2) : 0;
     else if (perGroup > 0) perGroup--;
@@ -103,7 +105,7 @@ export function buildCandidateContext(db: Database.Database, maxBytes: number = 
   }
   const baselineBytes = requestBytes(make(false));
   let context = make();
-  const input = () => [{ role: 'system', content: SYSTEM_PROMPT + (reviews.size || saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
+  const input = () => [{ role: 'system', content: SYSTEM_PROMPT + guidance + (reviews.size || saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
   const size = () => Buffer.byteLength(JSON.stringify({ input: input(), text: { format: CANDIDATE_FORMAT } }), 'utf8');
   trimReviewExcerpts(context.examples, size() - reviewInputBudget(baselineBytes, context.examples));
   while (size() > maxBytes) {

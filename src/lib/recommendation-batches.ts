@@ -1,3 +1,4 @@
+import { parsePreferences, type RecommendationPreferences } from './recommendation-preferences';
 // Node-only SQLite reader; no network, migration or filesystem writes.
 import type Database from 'better-sqlite3';
 import { blockedReason, readCandidateHistory } from './candidate-context';
@@ -9,7 +10,7 @@ export type RecommendationMovie = {
 };
 export type RecommendationBatch = {
   result_id: string; generated_at: string | null; recommended_at: string; time_kind: 'generated' | 'recorded';
-  total_count: number; hidden_count: number; unavailable_count: number; movies: RecommendationMovie[];
+  preferences?: RecommendationPreferences | null; total_count: number; hidden_count: number; unavailable_count: number; movies: RecommendationMovie[];
 };
 type Row = {
   id: number; result_id: string; recommended_at: string; why_fit: string | null; possible_mismatch: string | null;
@@ -39,10 +40,15 @@ export function readRecommendationBatch(db: Database.Database, resultId?: string
         FROM recommendations r LEFT JOIN movies m ON m.id=r.movie_id WHERE r.result_id=? ORDER BY r.id`).all(group.result_id) as Row[];
       if (!rows.length || rows.length > 5 || rows.some(row => !meaningful(row.why_fit) || !meaningful(row.possible_mismatch)) ||
         new Set(rows.map(row => row.recommended_at)).size !== 1 || !Number.isFinite(Date.parse(rows[0].recommended_at))) continue;
+      let preferences: RecommendationPreferences | null = null;
+      if (recommendationSchema(db) >= 7) {
+        const metadata = db.prepare('SELECT metadata_json FROM recommendation_evaluation WHERE result_id=?').get(group.result_id) as { metadata_json: string } | undefined;
+        try { const raw = metadata ? JSON.parse(metadata.metadata_json).preferences : undefined; if (raw !== undefined) preferences = parsePreferences(raw); } catch { /* Old/invalid optional metadata must not hide saved films. */ }
+      }
       const generated = isRequestId(group.result_id);
       const batch: RecommendationBatch = { result_id: group.result_id, generated_at: generated ? rows[0].recommended_at : null,
         recommended_at: rows[0].recommended_at, time_kind: generated ? 'generated' : 'recorded', total_count: rows.length,
-        hidden_count: 0, unavailable_count: 0, movies: [] };
+        preferences, hidden_count: 0, unavailable_count: 0, movies: [] };
       for (const row of rows) {
         const year = row.release_year ?? row.tmdb_release_year;
         if (row.tmdb_id === null || !Number.isSafeInteger(row.tmdb_id) || row.tmdb_id < 1 || row.media_type !== 'movie' || year === null || !Number.isInteger(year) || year < 1 || year > 9999 ||

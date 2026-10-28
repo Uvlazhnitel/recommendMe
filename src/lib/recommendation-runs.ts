@@ -1,3 +1,4 @@
+import type { RecommendationPreferences } from './recommendation-preferences';
 // Local HTTP orchestration journal. Private output, never a model prompt/profile or a task queue.
 import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -12,7 +13,7 @@ const processStartedAt = Date.now() - process.uptime() * 1000;
 
 export type RunStage = 'starting' | 'candidates' | 'ranking' | 'saving' | 'saved' | 'failed' | 'save_failed';
 export type StoredRun = {
-  request_id: string; started_at: string; stage: RunStage; code?: string; result_id?: string;
+  preferences?: RecommendationPreferences; request_id: string; started_at: string; stage: RunStage; code?: string; result_id?: string;
   candidates?: Awaited<ReturnType<typeof generateCandidates>>;
   ranking?: Awaited<ReturnType<typeof rankRecommendations>>;
   technical_usage?: { candidates?: unknown; ranking?: unknown };

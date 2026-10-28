@@ -1,3 +1,4 @@
+import { parsePreferences, preferenceExclusion, type RecommendationPreferences } from './recommendation-preferences';
 import { stageEvaluation } from './evaluation-metadata';
 import type Database from 'better-sqlite3';
 import { selectVerifiedCandidates } from './candidate-selection';
@@ -13,7 +14,7 @@ export type MovieCandidate = { tmdb_id: number; media_type: 'movie'; title: stri
 type Proposal = { title: string; year: number };
 type Source = 'llm' | 'tmdb';
 type Diagnostic = { source: Source; title: string; year: number | null; tmdb_id?: number; reason: string };
-type Options = { live?: boolean; apiKey?: string; model?: string; tmdbKey?: string; openaiFetch?: typeof fetch; tmdbFetch?: typeof fetch;
+type Options = { preferences?: RecommendationPreferences; live?: boolean; apiKey?: string; model?: string; tmdbKey?: string; openaiFetch?: typeof fetch; tmdbFetch?: typeof fetch;
   sleep?: (ms: number) => Promise<unknown>; now?: () => number; openaiTimeoutMs?: number; tmdbTimeoutMs?: number };
 export function parseCandidateProposals(body: unknown): Proposal[] {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'candidates')) throw new Error('Invalid OpenAI candidate response fields.');
@@ -28,8 +29,9 @@ export function parseCandidateProposals(body: unknown): Proposal[] {
   });
 }
 export async function generateCandidates(db: Database.Database, options: Options = {}) {
-  const context = buildCandidateContext(db);
-  const evaluation = stageEvaluation(context.input, CANDIDATE_FORMAT, context.summary);
+  const preferences = options.preferences === undefined ? undefined : parsePreferences(options.preferences);
+  const context = buildCandidateContext(db, undefined, preferences);
+  const evaluation = stageEvaluation(context.input, CANDIDATE_FORMAT, context.summary, preferences);
   const readiness = { openai_key: Boolean(options.apiKey?.trim()), openai_model: Boolean(options.model?.trim()), tmdb_key: Boolean(options.tmdbKey?.trim()) };
   if (!options.live) return { mode: 'dry-run' as const, ...context.summary, readiness, seeds: context.seeds, warnings: context.warnings };
   requireOpenAIConfig(options.apiKey, options.model);
@@ -41,14 +43,14 @@ export async function generateCandidates(db: Database.Database, options: Options
   const finish = () => {
     const history = readCandidateHistory(db);
     for (const [id, movie] of accepted) {
-      const reason = blockedReason({ id, title: movie.title, original_title: movie.original_title, year: movie.year }, history);
+      const reason = blockedReason({ id, title: movie.title, original_title: movie.original_title, year: movie.year }, history) || preferenceExclusion(movie, parsePreferences(preferences));
       if (reason) { accepted.delete(id); diagnostics.push({ source: movie.source === 'tmdb' ? 'tmdb' : 'llm', title: movie.title, year: movie.year, tmdb_id: id, reason }); }
     }
     const { candidates, selection } = selectVerifiedCandidates([...accepted.values()], history);
     const recent = diagnostics.filter(row => row.reason === 'recently_recommended').length;
     if (recent) warnings.push(`${recent} recently recommended candidates excluded for ${RECOMMENDATION_REPEAT_DAYS} days. No automatic cooldown relaxation.`);
     if (accepted.size > CANDIDATE_LIMITS.results) warnings.push('Verified candidate pool selected locally by metadata support and diversity, capped at 40; no final ranking was performed.');
-    return { mode: 'live' as const, status: errors.length ? (candidates.length ? 'partial' : 'error') : 'ok', candidates,
+    return { ...(preferences ? { preferences } : {}), mode: 'live' as const, status: errors.length ? (candidates.length ? 'partial' : 'error') : 'ok', candidates,
       rejected_by_reason: diagnostics.reduce<Record<string, number>>((counts, item) => { counts[item.reason] = (counts[item.reason] ?? 0) + 1; return counts; }, {}),
       diagnostics, errors, warnings, evaluation, selection, seed_selection: { rotation: context.summary.seed_rotation, seeds: context.seeds }, statistics: { openai_requests: 1, tmdb_requests: tmdb.stats.requests,
         tmdb_failed_requests: tmdb.stats.failedRequests, details_checked: detailsChecked, accepted: candidates.length, verified_before_cap: accepted.size, cap_excluded: selection.excluded_count, sources_before_cap: selection.before, sources_after_cap: selection.after,

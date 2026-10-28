@@ -1,3 +1,4 @@
+import { parsePreferences, customPreferences, preferenceGuidance, type RecommendationPreferences } from './recommendation-preferences';
 import type Database from 'better-sqlite3';
 import type { MovieCandidate } from './candidates';
 import { prepareTasteInputs } from './candidate-context';
@@ -13,7 +14,8 @@ For each why_fit explain concrete connections between confirmed candidate featur
 For possible_mismatch give a concrete supported risk or honestly state missing information/uncertainty; do not invent flaws to fill the field. Low vote_count/popularity indicates uncertainty, not poor quality; do not prefer a popular film over a better-fitting lesser-known film. Personal ratings are not TMDB ratings.
 Only movies of at least 60 minutes in the supplied list are eligible. The server independently checks viewed/hidden status and evidence. Explain the ranked choices, not private chain-of-thought. Each why_fit is at most 1000 characters and possible_mismatch at most 600.`;
 const truncate = (value: string | null, maximum: number) => value !== null && maximum ? [...value].slice(0, maximum).join('') : null;
-export function buildRankingContext(db: Database.Database, candidates: MovieCandidate[], maxBytes: number = RANKING_LIMITS.input_bytes) {
+export function buildRankingContext(db: Database.Database, candidates: MovieCandidate[], maxBytes: number = RANKING_LIMITS.input_bytes, preferences?: RecommendationPreferences) {
+  const wishes = parsePreferences(preferences), guidance = preferenceGuidance(wishes);
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid ranking input byte limit.');
   const personal = prepareTasteInputs(db);
   const high = personal.examples.filter(row => row.rating_100 >= 80).slice(0, 10), low = personal.examples.filter(row => row.rating_100 <= 60).slice(0, 10);
@@ -30,12 +32,12 @@ export function buildRankingContext(db: Database.Database, candidates: MovieCand
       const row = personal.byId.get(id);
       return row && row.rating_100 !== null ? [{ movie_id: id, title: row.title, year: row.release_year, rating_100: row.rating_100 }] : [];
     });
-    return { profile: personal.profile, profile_evidence_movies: personal.evidenceMovies, rating_changes: personal.changes,
+    return { ...(customPreferences(wishes) ? { request_preferences: wishes } : {}), profile: personal.profile, profile_evidence_movies: personal.evidenceMovies, rating_changes: personal.changes,
       examples, related_examples: relatedSelected, contrasts, current_evidence: currentEvidence,
       candidates: candidates.map(row => ({ tmdb_id: row.tmdb_id, media_type: row.media_type, title: row.title, original_title: row.original_title, year: row.year,
         overview: truncate(row.overview, candidateOverview), genres: row.genres, runtime: row.runtime, directors: row.directors, vote_count: row.vote_count, popularity: row.popularity })) };
   };
-  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: RANKING_PROMPT }, { role: 'user', content: JSON.stringify(value) }], text: { format } }), 'utf8');
+  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: RANKING_PROMPT + guidance }, { role: 'user', content: JSON.stringify(value) }], text: { format } }), 'utf8');
   while (requestBytes(makeContext(false)) > maxBytes) {
     if (candidateOverview) candidateOverview = candidateOverview > 300 ? candidateOverview / 2 : 0;
     else if (exampleOverview) exampleOverview = exampleOverview > 150 ? exampleOverview / 2 : 0;
@@ -46,7 +48,7 @@ export function buildRankingContext(db: Database.Database, candidates: MovieCand
   }
   const baselineBytes = requestBytes(makeContext(false));
   let context = makeContext();
-  const input = () => [{ role: 'system', content: RANKING_PROMPT + (personal.reviews.size || personal.saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
+  const input = () => [{ role: 'system', content: RANKING_PROMPT + guidance + (personal.reviews.size || personal.saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
   const bytes = () => Buffer.byteLength(JSON.stringify({ input: input(), text: { format } }), 'utf8');
   trimReviewExcerpts([...context.examples, ...context.related_examples], bytes() - reviewInputBudget(baselineBytes, [...context.examples, ...context.related_examples]));
   while (bytes() > maxBytes) {

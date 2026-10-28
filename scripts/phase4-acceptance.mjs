@@ -86,11 +86,12 @@ async function saveRating(value) {
   await page.getByRole('status').filter({hasText:/Оценка (сохранена|не изменилась)/}).waitFor();assert.equal(await rating().inputValue(),String(value));
 }
 async function clearRating() { await page.getByRole('button',{name:'Очистить оценку',exact:true}).click();await page.getByRole('status').filter({hasText:/Оценка (очищена|не изменилась)/}).waitFor();assert.equal(await rating().inputValue(),''); }
-async function dialogOpen() { await page.getByRole('button',{name:/^(Подобрать фильмы|Ещё рекомендации)$/}).click();await page.getByRole('dialog').waitFor(); }
+async function openMovie(title) { await page.getByRole('button',{name:`Подробнее: ${title}`,exact:true}).click();await page.getByRole('dialog').waitFor(); }
+async function dialogOpen() { await page.getByRole('button',{name:/^(Подобрать фильмы|Подобрать ещё)$/}).click();await page.getByRole('dialog').waitFor(); }
 async function generate(settings, expected=201) {
   control(settings);await dialogOpen();const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/recommendations/generate'&&r.request().method()==='POST');
   await page.getByRole('button',{name:'Да, подобрать',exact:true}).click();const result=await response;assert.equal(result.status(),expected);
-  if(expected===201){await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();}
+  if(expected===201){await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();await page.locator('.gallery-card').first().waitFor();}
   else await alerts().filter({hasText:/Не удалось|Нет подходящих|Подбор|Финальный|Время ожидания/}).first().waitFor();
   return result.json();
 }
@@ -112,23 +113,38 @@ try {
   assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Отмена');
   for(const key of ['Tab','Tab','Shift+Tab']){await page.keyboard.press(key);const focus=await page.evaluate(()=>({inside:Boolean(document.activeElement.closest('dialog')),tag:document.activeElement.tagName,text:document.activeElement.textContent?.slice(0,50)}));assert.ok(focus.inside,JSON.stringify({key,...focus}));}
   await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').isVisible(),false);assert.match(await page.evaluate(()=>document.activeElement.textContent),/Подобрать фильмы/);assert.equal(openaiCalls(),0);check('empty → confirmation/Escape/focus restore: zero provider calls');
+  for(const mood of ['Лёгкое и душевное','Хочу посмеяться','Что-то выдающееся','Есть над чем подумать','Чтобы захватило','Удиви меня']) {
+    await page.getByRole('radio',{name:new RegExp(mood)}).check();await dialogOpen();await page.getByRole('dialog').getByText(mood,{exact:false}).waitFor();await page.keyboard.press('Escape');
+  }
+  assert.equal(openaiCalls(),0);await page.getByRole('radio',{name:/Хочу посмеяться/}).check();await page.getByText('Есть пожелания?',{exact:true}).click();await page.getByRole('combobox',{name:'Длительность'}).selectOption('120');await dialogOpen();await page.getByRole('dialog').getByText(/До 2 часов/).waitFor();await page.keyboard.press('Escape');await page.getByRole('combobox',{name:'Длительность'}).selectOption('any');
+  check('all six mood selections and cancelled confirmations are free; wishes visible in confirmation');
   control({delay:1000});await dialogOpen();await page.getByRole('button',{name:'Да, подобрать',exact:true}).dblclick();
   await page.locator('.selection-loading').waitFor();const firstRequest=posts.at(-1);assert.ok(firstRequest?.request_id);
   const duplicate=await page.request.post(base+'/api/recommendations/generate',{data:firstRequest});assert.equal(duplicate.status(),409);
-  await page.reload();await until(async()=> (await state()).generation.state==='saved','generation survives reload');await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();
+  await page.reload();await until(async()=> (await state()).generation.state==='saved','generation survives reload');await page.locator('.gallery-card').first().waitFor();
   assert.equal(openaiCalls(),2);let first=await state();assert.equal(first.batch.movies.length,5);const firstId=first.batch.result_id;
+  assert.equal(first.batch.preferences.mood,'funny');assert.equal(first.batch.preferences.max_runtime,null);
+  await page.getByRole('radio',{name:/Лёгкое и душевное/}).check();assert.match(await page.locator('.home-batch-label').innerText(),/Хочу посмеяться/);assert.equal(openaiCalls(),2);
+  for(const width of [375,430,768,1024,1440]) {await page.setViewportSize({width,height:1000});await page.evaluate(()=>document.fonts.ready);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.equal(await page.locator('.gallery-card').count(),5);await screenshot(`home-5-${width}`,true);}
+  await page.setViewportSize({width:1440,height:1000});
+  await openMovie(first.batch.movies[0].title);const originalText=first.batch.movies[0].why_fit;assert.equal(await page.locator('.movie-explanation section').first().locator('p').innerText(),originalText);
+  for(const key of ['Tab','Tab','Tab','Tab','Shift+Tab']) {await page.keyboard.press(key);assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('.movie-explanation'))));}
+  await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);
+  for(const width of [375,430]) {await page.setViewportSize({width,height:1000});await openMovie(first.batch.movies[0].title);assert.ok(await page.locator('.movie-explanation').evaluate(el=>el.scrollWidth<=el.clientWidth));await screenshot(`home-details-${width}`);await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);}
+  await page.setViewportSize({width:1440,height:1000});
+  check('gallery5 all widths, saved wishes distinct from draft, full explanations, modal Escape/focus');
   await screenshot('recommendations-desktop');
   const mobileCapture=await browser.newContext({viewport:{width:375,height:1000}}),mobilePage=await mobileCapture.newPage();
-  await mobilePage.goto(base+'/');await mobilePage.waitForLoadState('networkidle');await mobilePage.evaluate(()=>document.fonts.ready);await mobilePage.screenshot({path:join(output,'recommendations-mobile.png')});await mobileCapture.close();await page.getByRole('button',{name:`Выбрать ${first.batch.movies[1].title}`,exact:true}).click();assert.equal(openaiCalls(),2);
+  await mobilePage.goto(base+'/');await mobilePage.waitForLoadState('networkidle');await mobilePage.evaluate(()=>document.fonts.ready);await mobilePage.screenshot({path:join(output,'recommendations-mobile.png')});await mobileCapture.close();await openMovie(first.batch.movies[1].title);await page.keyboard.press('Escape');assert.equal(openaiCalls(),2);
   const replay=await page.request.post(base+'/api/recommendations/generate',{data:firstRequest});assert.equal(replay.status(),200);assert.equal(openaiCalls(),2);check('two mocked OpenAI stages; double click/concurrent POST/reload/replay never pay again');
-  const rejection=first.batch.movies[4];await page.getByRole('button',{name:`Выбрать ${rejection.title}`,exact:true}).click();await page.getByRole('button',{name:'Неинтересно',exact:true}).click();
+  const rejection=first.batch.movies[4];await openMovie(rejection.title);await page.getByRole('button',{name:'Неинтересно',exact:true}).click();
   await until(async()=> (await state()).batch.movies.length===4,'rejection removes active film');
   database(db=>{const row=db.prepare('SELECT watched,rating_100,not_interested FROM user_movies WHERE movie_id=?').get(rejection.movie_id);assert.deepEqual(row,{watched:0,rating_100:null,not_interested:1});});
   await page.getByRole('button',{name:'Отменить',exact:true}).click();await until(async()=> (await state()).batch.movies.length===5,'undo restores active film');
   database(db=>assert.equal(db.prepare('SELECT rejected FROM recommendations WHERE movie_id=?').get(rejection.movie_id).rejected,1));assert.equal(openaiCalls(),2);check('reject/undo keeps rating/view/history and does not generate');
   const watched=[];
   for(const [index,value] of [[0,90],[1,null],[2,0]]) {
-    const movie=first.batch.movies[index];await go('/');await page.getByRole('button',{name:`Выбрать ${movie.title}`,exact:true}).click();await page.getByRole('button',{name:'Посмотрел',exact:true}).click();
+    const movie=first.batch.movies[index];await go('/');await openMovie(movie.title);await page.getByRole('button',{name:'Посмотрел',exact:true}).click();
     await page.waitForURL(base+`/rate?movie_id=${movie.movie_id}`);await rating().waitFor();
     database(db=>assert.equal(db.prepare('SELECT watched FROM user_movies WHERE movie_id=?').get(movie.movie_id)?.watched??0,0));
     if(value!==null)await rating().fill(String(value));else assert.equal(await rating().inputValue(),'');
@@ -139,6 +155,7 @@ try {
     if(index>0)database(db=>assert.equal(db.prepare('SELECT review_text FROM user_movies WHERE movie_id=?').get(movie.movie_id).review_text,`Review with ${value===null?'NULL':'zero'} rating`));
     watched.push(movie);await page.getByRole('link',{name:'Вернуться к рекомендациям →',exact:true}).click();await page.waitForURL(base+'/');await until(async()=>!(await state()).batch.movies.some(row=>row.movie_id===movie.movie_id),'watched removed');
   }
+  await go('/');assert.equal(await page.locator('.gallery-card').count(),2);await screenshot('home-2-1440',true);await page.setViewportSize({width:375,height:1000});await screenshot('home-2-375',true);await page.setViewportSize({width:1440,height:1000});
   assert.equal(openaiCalls(),2);check('recommendations → rate deep link → watched 90 / NULL / real 0 → active exclusions');
   await go(`/library?movie_id=${watched[0].movie_id}`);await rating().waitFor();await saveRating(40);await clearRating();
   await go('/library?movie_id=1');await rating().waitFor();await saveRating(90);await saveRating(40);await clearRating();
@@ -183,10 +200,10 @@ try {
   await page.unrouteAll({behavior:'wait'});await saveRating(85);check('failed rating preserves draft/server value and explicit retry succeeds');
 
   await go('/');const oldBatch=(await state()).batch.result_id;const paidBeforeFailure=openaiCalls();await generate({round:2,mode:'openai_error'},502);assert.equal(openaiCalls(),paidBeforeFailure+1);assert.equal((await state()).batch.result_id,oldBatch);await screenshot('generation-error');
-  await page.getByRole('button',{name:'Проверить состояние'}).click();await until(async()=>await page.getByRole('button',{name:'Ещё рекомендации',exact:true}).isEnabled(),'failed generation ready for explicit action');
+  await page.getByRole('button',{name:'Проверить состояние'}).click();await until(async()=>await page.getByRole('button',{name:'Подобрать ещё',exact:true}).isEnabled(),'failed generation ready for explicit action');
   for(const mode of ['invalid','refusal','incomplete','no_candidates']){const n=openaiCalls();await generate({round:2,mode},mode==='no_candidates'?422:502);assert.equal(openaiCalls(),n+1);assert.equal((await state()).batch.result_id,oldBatch);await page.getByRole('button',{name:'Проверить состояние'}).click();}
   check('provider error, malformed/refused output and no candidates preserve previous batch without automatic retry');
-  control({round:2,delay:600});const beforeNew=openaiCalls();await dialogOpen();const secondResponse=page.waitForResponse(r=>r.url()===base+'/api/recommendations/generate'&&r.request().method()==='POST');await page.getByRole('button',{name:'Да, подобрать'}).click();await page.locator('.selection-loading').waitFor();assert.ok(await page.locator('.spotlight').isVisible());assert.equal((await secondResponse).status(),201);await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();assert.equal(openaiCalls(),beforeNew+2);
+  control({round:2,delay:600});const beforeNew=openaiCalls();await dialogOpen();const secondResponse=page.waitForResponse(r=>r.url()===base+'/api/recommendations/generate'&&r.request().method()==='POST');await page.getByRole('button',{name:'Да, подобрать'}).click();await page.locator('.selection-loading').waitFor();assert.ok(await page.locator('.recommendation-grid').isVisible());assert.equal((await secondResponse).status(),201);await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();assert.equal(openaiCalls(),beforeNew+2);
   const second=(await state()).batch;assert.notEqual(second.result_id,firstId);database(db=>assert.equal(db.prepare('SELECT count(*) n FROM recommendations WHERE result_id=?').get(firstId).n,5));check('second saved batch preserves first history and keeps previous screen during loading');
   // Fail only the final transaction, after providers and durable preparation succeeded.
   database(db=>db.exec("CREATE TRIGGER qa_fail_save BEFORE INSERT ON recommendations BEGIN SELECT RAISE(ABORT,'qa save failure'); END"));const countBefore=database(db=>db.prepare('SELECT count(*) n FROM movies').get().n);
@@ -224,7 +241,7 @@ try {
   // Same app and stored rows, at each width; no stateful production fixtures.
   for(const width of [375,430,768,1024,1440]){
     await page.setViewportSize({width,height:1000});await page.emulateMedia({reducedMotion:'reduce'});
-    await go('/');await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    await go('/');await page.locator('.gallery-card').first().waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     if(width===375)await screenshot('recommendations-mobile-missing-images');
     await go(`/rate?movie_id=${watched[0].movie_id}`);await rating().waitFor();await page.getByRole('slider').focus();await page.keyboard.press('Home');assert.equal(await rating().inputValue(),'0');await page.keyboard.press('End');assert.equal(await rating().inputValue(),'100');await page.keyboard.press('ArrowLeft');assert.equal(await rating().inputValue(),'99');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));if(width===375)await screenshot('rate-mobile');
@@ -265,11 +282,27 @@ try {
     await saveRating(85);
   }
   assert.equal(openaiCalls(),reviewCallsBefore);check('reviews desktop/mobile: explicit CRUD/reload, rating independence, API failure retains draft; zero AI calls');
-  const beforeRestart=openaiCalls(), resultId=(await state()).batch.result_id;await stop();await start();await go('/');await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();assert.equal((await state()).batch.result_id,resultId);assert.equal(openaiCalls(),beforeRestart);
+  const beforeRestart=openaiCalls(), resultId=(await state()).batch.result_id;await stop();await start();await go('/');await page.locator('.gallery-card').first().waitFor();assert.equal((await state()).batch.result_id,resultId);assert.equal(openaiCalls(),beforeRestart);
   assert.equal((await page.request.get(base+'/preview/recommendations')).status(),404);
   for(const path of ['/api/health','/api/library','/api/library/1','/api/recommendations']){const r=await page.request.get(base+path);assert.equal(r.status(),200);assert.equal(r.headers()['cache-control'],'no-store');}
   const bad=await page.request.patch(base+'/api/library/1/rating',{headers:{Origin:'null'},data:{rating_100:1}});assert.equal(bad.status(),403);assert.equal(database(db=>db.prepare('SELECT rating_100 FROM user_movies WHERE movie_id=1').get().rating_100),null);
   assert.equal((await page.request.get(base+'/api/library?year=bad')).status(),400);check('production restart, saved batch, no payment, Origin/no-store/invalid parameters/preview 404');
+  await page.setViewportSize({width:1440,height:1000});await go('/');
+  const homeState=await state(), freeBefore=openaiCalls();
+  assert.ok(homeState.home.favorites.length>0);const favorite=homeState.home.favorites[0];await page.locator('.favorite-card').first().click();await page.waitForURL(base+`/library?movie_id=${favorite.movie_id}`);await rating().waitFor();await go('/');
+  await openMovie(homeState.batch.movies[0].title);await page.route('**/api/recommendations/reject',route=>route.fulfill({status:500,json:{error:'synthetic_failure'}}));await page.getByRole('button',{name:'Неинтересно',exact:true}).click();await page.locator('.movie-explanation [role="alert"]').waitFor();assert.equal(await page.locator('.gallery-card').count(),5);await page.unrouteAll({behavior:'wait'});await page.keyboard.press('Escape');
+  check('favorites deep link; failed rejection retains modal/card and shows error');
+  for(const movie of homeState.batch.movies) {
+    await openMovie(movie.title);await page.getByRole('button',{name:'Неинтересно',exact:true}).click();await until(async()=>!(await state()).batch.movies.some(m=>m.tmdb_id===movie.tmdb_id),'gallery rejection persisted');await until(async()=>await page.locator('.gallery-card').count()===(await state()).batch.movies.length,'gallery compacted');
+    const n=(await state()).batch.movies.length;if([2,1,0].includes(n)){
+      for(const width of [375,430,1440]){await page.setViewportSize({width,height:1000});await screenshot(`home-${n}-${width}`,true);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
+    }
+  }
+  await page.getByRole('heading',{name:'Эту подборку ты уже разобрал',exact:true}).waitFor();assert.ok(await page.getByRole('heading',{name:'Твои любимые фильмы',exact:true}).isVisible());assert.equal(await page.locator('.gallery-card').count(),0);await page.getByRole('button',{name:'Отменить',exact:true}).click();await until(async()=>await page.locator('.gallery-card').count()===1,'undo restores final film');assert.equal(openaiCalls(),freeBefore);
+  check('gallery5→4→3→2→1→0 compact layout, empty completion, favorites persist, undo without generation');
+  const realState=await state();await page.route('**/api/recommendations',route=>route.fulfill({json:{...realState,batch:{...realState.batch,preferences:null}}}));await go('/');await page.getByText('Персональная подборка',{exact:true}).waitFor();await page.unrouteAll({behavior:'wait'});
+  await page.route('**/api/recommendations',route=>route.fulfill({json:{...realState,batch:null,home:{favorites:[],stats:{watched:0,rated:0}}}}));await go('/');await page.getByText('Открыть библиотеку',{exact:true}).waitFor();await screenshot('home-empty-library',true);await page.unrouteAll({behavior:'wait'});assert.equal(openaiCalls(),freeBefore);
+  check('historical unlabelled batch and empty home library work without new APIs');
   assert.equal(errors.length,0,errors.join('\n'));report.mock_calls={openai:openaiCalls(),tmdb:calls('api.themoviedb.org')};report.status='passed';
 } catch(error) {
   report.status='failed';report.failure=error.message;
