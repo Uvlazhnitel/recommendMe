@@ -13,20 +13,20 @@ import { recommendationHandlers } from '../src/lib/recommendations-http';
 import { recordRecommendations, rejectRecommendation } from '../src/lib/recommendation-memory';
 import { blockedReason, readCandidateHistory } from '../src/lib/candidate-context';
 import { parseCandidateReport } from '../src/lib/recommendation-schema';
-import { migrateDatabase } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 const ranking = (id: string = randomUUID(), ids = [201,202]) => ({ mode: 'live', status: 'ok', result_id: id, generated_at: new Date(Date.now()-10).toISOString(), recommendations: ids.map(choice) });
 const errorCode = (code: string) => (error: unknown) => error instanceof GenerationError && error.code === code;
 const noSleep = async () => {};
 const count = (f: ReturnType<typeof fixture>) => (f.db.prepare('SELECT count(*) n FROM recommendations').get() as { n: number }).n;
 
-test('schemas 3–5 read without migration or writes; migration preserves rows and nullable images', () => {
-  for (const version of [3,4,5]) {
+test('schemas 3–6 read without migration or writes; migration preserves rows and nullable images', () => {
+  for (const version of [3,4,5,6]) {
     const f = fixture(version);
     try {
       const before = readFileSync(f.path), p = personal(f.db);
       assert.equal(recommendationState({ open: f.open, config }).batch, null);
       assert.deepEqual(readFileSync(f.path), before);
-      migrateDatabase(f.db); assert.equal(f.db.pragma('user_version',{simple:true}),5); assert.equal(personal(f.db),p);
+      migrateDatabase(f.db); assert.equal(f.db.pragma('user_version',{simple:true}),SCHEMA_VERSION); assert.equal(personal(f.db),p);
       assert.deepEqual(f.db.prepare('SELECT backdrop_path FROM movies').all(), Array(3).fill({backdrop_path:null}));
     } finally { f.cleanup(); }
   }
@@ -76,7 +76,7 @@ test('one cycle performs candidates then ranking, stores short batch, replays af
     assert.equal((h.bodies[0].text as {format:{name:string}}).format.name,'movie_candidates');
     assert.equal((h.bodies[1].text as {format:{name:string}}).format.name,'personal_movie_ranking');
     for (const body of h.bodies) { assert.equal(body.store,false); assert.equal(body.max_output_tokens,12000); assert.ok(!JSON.stringify(body.input).includes('/backdrop.jpg')); }
-    assert.equal(personal(f.db),before); assert.equal(f.db.pragma('user_version',{simple:true}),5);
+    assert.equal(personal(f.db),before); assert.equal(f.db.pragma('user_version',{simple:true}),SCHEMA_VERSION);
     const replay = await generateRecommendationBatch(id,{open:f.open,config:()=>({}),fetch:async()=>{throw Error('No network');}}); assert.equal(replay.replayed,true); assert.equal(count(f),2);
     const child = spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',`import {generateRecommendationBatch} from './src/lib/recommendation-service.ts'; const r=await generateRecommendationBatch('${id}'); console.log(r.replayed);`],{cwd:resolve('.'),env:{...process.env,DATABASE_PATH:f.path,OPENAI_API_KEY:'',OPENAI_MODEL:'',TMDB_API_KEY:''},encoding:'utf8'});
     assert.equal(child.status,0,child.stderr); assert.equal(child.stdout.trim(),'true');

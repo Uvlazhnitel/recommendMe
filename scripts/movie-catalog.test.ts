@@ -22,7 +22,7 @@ function fixture(version = 4) {
   return { db, folder, path, close: () => { if (db.open) db.close(); rmSync(folder, { recursive: true, force: true }); } };
 }
 function snapshot(db: Database.Database) {
-  return JSON.stringify(['user_movies', 'recommendations', 'taste_profile'].map(table => db.prepare(table === 'recommendations' ? 'SELECT id,movie_id,recommended_at,why_fit,possible_mismatch,rejected FROM recommendations' : `SELECT * FROM ${table}`).all()));
+  return JSON.stringify(['user_movies', 'recommendations', 'taste_profile'].map(table => db.prepare(table === 'recommendations' ? 'SELECT id,movie_id,recommended_at,why_fit,possible_mismatch,rejected FROM recommendations' : `SELECT * FROM ${table}`).all().map(row => table === 'user_movies' ? { review_text: null, ...row as object } : row)));
 }
 function mocked(handler: (url: URL) => unknown) {
   const urls: URL[] = []; let clock = 0;

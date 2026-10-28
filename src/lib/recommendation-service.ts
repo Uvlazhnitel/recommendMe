@@ -23,7 +23,7 @@ function readiness(db: Database.Database, config: { apiKey?: string; model?: str
   try {
     const personal = prepareTasteInputs(db);
     return { can_generate: settings && personal.rated.length > 0, reason: !settings ? 'configuration_missing' : !personal.rated.length ? 'ratings_missing' : null,
-      profile_refresh: { status: personal.profileRefresh.status, total_changes: personal.profileRefresh.total_changes, threshold: personal.profileRefresh.threshold } };
+      profile_refresh: { status: personal.profileRefresh.status, total_changes: personal.profileRefresh.total_changes, review_changes: personal.profileRefresh.review_changes, total_feedback_changes: personal.profileRefresh.total_feedback_changes, threshold: personal.profileRefresh.threshold } };
   } catch {
     return { can_generate: false, reason: 'profile_unavailable', profile_refresh: null };
   }

@@ -109,7 +109,7 @@ test('successful enrichment migrates version 2, preserves source and personal da
   const f = fixture(true);
   try {
     const preserved = () => ['user_movies', 'recommendations', 'taste_profile'].map(table => f.db.prepare(table === 'recommendations'
-      ? 'SELECT id,movie_id,recommended_at,why_fit,possible_mismatch,rejected FROM recommendations' : `SELECT * FROM ${table}`).all());
+      ? 'SELECT id,movie_id,recommended_at,why_fit,possible_mismatch,rejected FROM recommendations' : `SELECT * FROM ${table}`).all().map(row => table === 'user_movies' ? { review_text: null, ...row as object } : row));
     const before = preserved();
     const original = f.db.prepare('SELECT title,release_year,letterboxd_uri FROM movies').all();
     const progress: number[] = [];

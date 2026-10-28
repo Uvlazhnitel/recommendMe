@@ -4,13 +4,14 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, json, message, scoreValue, type Match } from './workbench-api';
 
 export type Film = { movie_id: number; tmdb_id: number | null; title: string; year: number | null; watched: boolean;
-  rating_100: number | null; rating_source: string; not_interested: boolean; original_rating_stars: number | null; poster_path: string | null;
+  rating_100: number | null; review_text?: string | null; rating_source: string; not_interested: boolean; original_rating_stars: number | null; poster_path: string | null;
   original_title?: string | null; tmdb_title?: string | null; directors?: { id: number; name: string }[] | null; overview?: string | null; runtime_minutes?: number | null; genres?: { id: number; name: string }[] | null };
-type Operation = 'select' | 'watch' | 'rating' | 'clear' | 'reject';
+type Operation = 'select' | 'watch' | 'rating' | 'clear' | 'reject' | 'review';
 
 // One controller for local selection and explicit writes on both rating screens.
 export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
   const [selected, setSelected] = useState<Film | null>(null), [selecting, setSelecting] = useState(initialMovieId !== undefined), [score, setScore] = useState('');
+  const [review, setReview] = useState('');
   const [pending, setPending] = useState<Operation | null>(null), [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null), [matches, setMatches] = useState<Match[]>([]);
   const [recoveryMovieId, setRecoveryMovieId] = useState<number | null>(null), [watchConfirmed, setWatchConfirmed] = useState(false);
   const [addingId, setAddingId] = useState<number | null>(null);
@@ -30,7 +31,8 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
     const run = ++detailRun.current, controller = new AbortController(); detailAbort.current = controller;
     api<Film>(`/api/library/${initialMovieId}`, { signal: controller.signal }).then(film => {
       if (run === detailRun.current && !controller.signal.aborted) {
-        setSelected(film); setScore(film.rating_100 === null ? '' : String(film.rating_100)); setNotice(null); setMatches([]); setRecoveryMovieId(null);
+        setSelected(film); setScore(film.rating_100 === null ? '' : String(film.rating_100));
+        setReview(film.review_text ?? ''); setNotice(null); setMatches([]); setRecoveryMovieId(null);
       }
     }).catch(error => { if (!controller.signal.aborted && run === detailRun.current) { setSelected(null); setNotice({ error: true, text: message(error) }); setRecoveryMovieId(initialMovieId); } })
       .finally(() => { if (!controller.signal.aborted && run === detailRun.current) { setSelecting(false); setLoadedInitialId(initialMovieId); } });
@@ -42,7 +44,7 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
     setSelecting(true); setSelected(null); setNotice(null); setMatches([]); setRecoveryMovieId(null); setWatchConfirmed(false);
     try {
       const film = await api<Film>(`/api/library/${movieId}`, { signal: controller.signal });
-      if (alive.current && run === detailRun.current) { setSelected(film); setScore(film.rating_100 === null ? '' : String(film.rating_100)); }
+      if (alive.current && run === detailRun.current) { setSelected(film); setScore(film.rating_100 === null ? '' : String(film.rating_100)); setReview(film.review_text ?? ''); }
     } catch (error) { if (alive.current && !controller.signal.aborted && run === detailRun.current) { setNotice({ error: true, text: message(error) }); setRecoveryMovieId(movieId); } }
     finally { if (alive.current && run === detailRun.current) setSelecting(false); }
   }
@@ -50,7 +52,7 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
     if (actionLock.current) return false;
     actionLock.current = true; ++detailRun.current; detailAbort.current?.abort();
     setSelecting(false); setPending(kind); setNotice(null); setMatches([]); setRecoveryMovieId(null);
-    if (kind === 'select') { setSelected(null); setScore(''); setWatchConfirmed(false); }
+    if (kind === 'select') { setSelected(null); setScore(''); setReview(''); setWatchConfirmed(false); }
     let completedId: number | null = null;
     try {
       const result = await operation(); completedId = result.movieId; saved.current?.();
@@ -60,6 +62,7 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
       const film = await api<Film>(`/api/library/${result.movieId}`, { signal: controller.signal });
       if (!alive.current) return false;
       setSelected(film); setScore(film.rating_100 === null ? '' : String(film.rating_100));
+      if (kind === 'select' || kind === 'watch' || kind === 'review') setReview(film.review_text ?? '');
       if (alive.current) setNotice({ error: false, text: result.text });
       return true;
     } catch (error) {
@@ -79,7 +82,7 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
     let rating; try { rating = scoreValue(score, true); } catch (error) { setNotice({ error: true, text: message(error) }); return; }
     const movieId = selected.movie_id;
     void action('watch', async () => {
-      const result = await api<{ status: string }>(`/api/movies/${movieId}/watch`, json(rating === undefined ? {} : { rating_100: rating }));
+      const result = await api<{ status: string }>(`/api/movies/${movieId}/watch`, json({ ...(rating === undefined ? {} : { rating_100: rating }), ...(review ? { review_text: review } : {}) }));
       return { movieId, text: result.status === 'unchanged' ? 'Просмотр уже сохранён. Изменений нет.' : 'Просмотр сохранён.' };
     });
   }
@@ -94,6 +97,14 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
     event.preventDefault();
     try { edit(scoreValue(score)!); } catch (error) { setNotice({ error: true, text: message(error) }); }
   }
+  function saveReview() {
+    if (!selected?.watched) return;
+    const movieId = selected.movie_id;
+    void action('review', async () => {
+      await api(`/api/library/${movieId}/review`, json({ review_text: review || null }, 'PATCH'));
+      return { movieId, text: review.trim() ? 'Впечатления сохранены.' : 'Впечатления удалены.' };
+    });
+  }
   function reject() {
     if (!selected || selected.tmdb_id === null) return;
     const film = selected;
@@ -105,7 +116,7 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
   function cancelDetails() { ++detailRun.current; detailAbort.current?.abort(); setLoadedInitialId(initialMovieId); setSelecting(false); setRecoveryMovieId(null); }
   function clearFeedback() { setNotice(null); setMatches([]); }
   const initialLoading = initialMovieId !== undefined && initialMovieId !== loadedInitialId;
-  return { selected: initialLoading ? null : selected, selecting: selecting || initialLoading, score, setScore, busy, pending, notice, matches, recoveryMovieId, watchConfirmed, addingId, setAddingId,
+  return { selected: initialLoading ? null : selected, selecting: selecting || initialLoading, score, setScore, review, setReview, saveReview, busy, pending, notice, matches, recoveryMovieId, watchConfirmed, addingId, setAddingId,
     choose, action, watch, saveScore, edit, reject, cancelDetails, clearFeedback, setNotice, isLocked: () => actionLock.current };
 }
 export type MovieEditorModel = ReturnType<typeof useMovieEditor>;

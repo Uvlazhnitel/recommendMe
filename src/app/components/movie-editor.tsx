@@ -32,6 +32,12 @@ export function MovieEditor({ model: m, enhanced = false, collection = false, he
       <legend className="sr-only">Просмотр и оценка {film.title}</legend>
       <form className="score-form" onSubmit={film.watched ? m.saveScore : m.watch}>
         {ratingFields}
+        <label className="review-field">Впечатления о фильме <span className="muted">(необязательно)</span>
+          <textarea name="review_text" rows={5} maxLength={2000} value={m.review ?? ''} onChange={e => m.setReview(e.target.value)}
+            placeholder="Что понравилось, а что не подошло именно в этом фильме?" aria-describedby="review-help" />
+        </label>
+        <p className="field-help" id="review-help">{(m.review ?? '').length}/2000 · {film.watched ? 'Текст сохраняется отдельной кнопкой. Чтобы удалить, очистите поле и сохраните.' : 'Текст сохранится после подтверждения просмотра.'}</p>
+        {film.watched ? <Button tone="quiet" type="button" onClick={m.saveReview}>{m.pending === 'review' ? 'Сохраняем впечатления…' : 'Сохранить впечатления'}</Button> : null}
         <div className="score-actions"><Button disabled={enhanced && (draft.invalid || (film.watched && draft.value === null))}>
           {m.pending === 'watch' ? 'Сохраняем просмотр…' : m.pending === 'rating' ? 'Сохраняем оценку…' : film.watched ? 'Сохранить оценку' : 'Подтвердить просмотр'}
         </Button>{film.watched ? <Button tone="quiet" type="button" onClick={() => m.edit(null)}>{m.pending === 'clear' ? 'Очищаем…' : 'Очистить оценку'}</Button> : null}</div>

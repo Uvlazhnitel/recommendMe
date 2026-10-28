@@ -132,9 +132,11 @@ try {
     await page.waitForURL(base+`/rate?movie_id=${movie.movie_id}`);await rating().waitFor();
     database(db=>assert.equal(db.prepare('SELECT watched FROM user_movies WHERE movie_id=?').get(movie.movie_id)?.watched??0,0));
     if(value!==null)await rating().fill(String(value));else assert.equal(await rating().inputValue(),'');
+    if(index>0)await page.getByRole('textbox',{name:'Впечатления о фильме',exact:false}).fill(`Review with ${value===null?'NULL':'zero'} rating`);
     const beforeCount=database(db=>db.prepare('SELECT count(*) n FROM user_movies WHERE rating_100 IS NOT NULL').get().n);
     await page.getByRole('button',{name:'Подтвердить просмотр',exact:true}).click();await page.getByRole('status').filter({hasText:'Просмотр сохранён.'}).waitFor();
     database(db=>{assert.equal(db.prepare('SELECT watched FROM user_movies WHERE movie_id=?').get(movie.movie_id).watched,1);assert.equal(db.prepare('SELECT rating_100 FROM user_movies WHERE movie_id=?').get(movie.movie_id).rating_100,value);assert.equal(db.prepare('SELECT count(*) n FROM user_movies WHERE rating_100 IS NOT NULL').get().n,beforeCount+(value===null?0:1));});
+    if(index>0)database(db=>assert.equal(db.prepare('SELECT review_text FROM user_movies WHERE movie_id=?').get(movie.movie_id).review_text,`Review with ${value===null?'NULL':'zero'} rating`));
     watched.push(movie);await page.getByRole('link',{name:'Вернуться к рекомендациям →',exact:true}).click();await page.waitForURL(base+'/');await until(async()=>!(await state()).batch.movies.some(row=>row.movie_id===movie.movie_id),'watched removed');
   }
   assert.equal(openaiCalls(),2);check('recommendations → rate deep link → watched 90 / NULL / real 0 → active exclusions');
@@ -237,6 +239,32 @@ try {
   const touch=await browser.newContext({viewport:{width:430,height:932},isMobile:true,hasTouch:true});const phone=await touch.newPage();
   await phone.goto(base+`/library?movie_id=${watched[0].movie_id}`);const slider=phone.getByRole('slider');await slider.waitFor();const box=await slider.boundingBox();await phone.touchscreen.tap(box.x+box.width*.5,box.y+box.height/2);assert.ok(Number(await phone.getByRole('spinbutton',{name:'Точное число'}).inputValue())>=45);await touch.close();check('five widths, long title/no poster, keyboard slider, reduced motion and touch draft');
   await page.route('**/api/library?*',route=>route.fulfill({json:{items:[],total:0,page:1,limit:25,total_pages:0}}));await go('/library');await libraryReady();await page.getByRole('heading',{name:'Здесь будет ваша история кино',exact:true}).waitFor();await screenshot('library-empty');await page.unrouteAll({behavior:'wait'});check('empty library UI offers rating navigation (read-response simulation)');
+  // Review regression: explicit writes, independent drafts and persistence on desktop/mobile.
+  const reviewCallsBefore=openaiCalls();
+  for(const width of [1440,375]) {
+    await page.setViewportSize({width,height:1000});await go(`/library?movie_id=${watched[0].movie_id}`);await rating().waitFor();
+    const review=page.getByRole('textbox',{name:'Впечатления о фильме',exact:false});
+    const save=page.getByRole('button',{name:'Сохранить впечатления',exact:true});
+    const text=`  Атмосфера и герои понравились.\nМедленный темп здесь иногда мешал. ${width} 🎬  `;
+    await review.fill(text);await review.press('Enter');await review.fill(text);
+    database(db=>assert.equal(db.prepare('SELECT review_text FROM user_movies WHERE movie_id=?').get(watched[0].movie_id).review_text,null));
+    await save.click();await page.getByRole('status').filter({hasText:'Впечатления сохранены.'}).waitFor();
+    assert.equal(await review.inputValue(),text);assert.equal(await rating().inputValue(),'85');
+    await page.reload();await review.waitFor();assert.equal(await review.inputValue(),text);
+    await review.fill(text+'Черновик');await saveRating(86);assert.equal(await review.inputValue(),text+'Черновик');
+    database(db=>assert.equal(db.prepare('SELECT review_text FROM user_movies WHERE movie_id=?').get(watched[0].movie_id).review_text,text));
+    await page.route(`**/api/library/${watched[0].movie_id}/review`,route=>route.fulfill({status:500,json:{error:'review_unavailable'}}));
+    await save.click();await alerts().first().waitFor();assert.equal(await review.inputValue(),text+'Черновик');
+    await page.unrouteAll({behavior:'wait'});await save.click();await page.getByRole('status').filter({hasText:'Впечатления сохранены.'}).waitFor();
+    assert.equal(await rating().inputValue(),'86');
+    await review.scrollIntoViewIfNeeded();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    assert.equal(await page.locator('nextjs-portal').count(),0);
+    await screenshot(width===1440?'review-desktop':'review-mobile');
+    await review.fill('');await save.click();await page.getByRole('status').filter({hasText:'Впечатления удалены.'}).waitFor();
+    await page.reload();await review.waitFor();assert.equal(await review.inputValue(),'');assert.equal(await rating().inputValue(),'86');
+    await saveRating(85);
+  }
+  assert.equal(openaiCalls(),reviewCallsBefore);check('reviews desktop/mobile: explicit CRUD/reload, rating independence, API failure retains draft; zero AI calls');
   const beforeRestart=openaiCalls(), resultId=(await state()).batch.result_id;await stop();await start();await go('/');await page.getByRole('button',{name:'Посмотрел',exact:true}).waitFor();assert.equal((await state()).batch.result_id,resultId);assert.equal(openaiCalls(),beforeRestart);
   assert.equal((await page.request.get(base+'/preview/recommendations')).status(),404);
   for(const path of ['/api/health','/api/library','/api/library/1','/api/recommendations']){const r=await page.request.get(base+path);assert.equal(r.status(),200);assert.equal(r.headers()['cache-control'],'no-store');}

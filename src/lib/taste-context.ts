@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { readReviewTexts, reviewSnapshot, reviewExample, REVIEW_GUIDANCE, reviewContextSize, trimReviewExcerpts, reviewInputBudget } from './review-context';
 import { PROFILE_FORMAT, PROFILE_SCHEMA_VERSION, PROMPT_VERSION, type Evidence } from './taste-schema';
 
 export const MAX_INPUT_BYTES = 120000;
@@ -86,6 +87,7 @@ function selectContrasts(rows: Row[], details: Map<number, Metadata>) {
 
 export function buildTasteContext(database: Database.Database, maxBytes = MAX_INPUT_BYTES) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid context byte limit.');
+  const reviews = readReviewTexts(database), reviewsSnapshot = reviewSnapshot(reviews);
   const rows = database.prepare(`SELECT m.id movie_id,m.title,m.release_year year,u.rating_100,m.tmdb_id,m.overview,m.genres_json,m.directors_json,m.runtime_minutes
     FROM movies m JOIN user_movies u ON m.id=u.movie_id WHERE u.rating_100 IS NOT NULL ORDER BY m.id`).all() as Row[];
   if (!rows.length) throw new Error('No rated works are available for taste analysis.');
@@ -99,25 +101,36 @@ export function buildTasteContext(database: Database.Database, maxBytes = MAX_IN
   const selected = selectExamples(rows, details);
   const allPairs = selectContrasts(rows, details);
   let overviewLimit = 600, perGroup = 20, pairLimit = 12;
-  const makeContext = () => ({ statistics, ratings, detailed_examples: (['high', 'medium', 'low'] as const).flatMap(group => selected[group].slice(0, perGroup).map(id => {
+  const makeContext = (includeReviews = true) => ({ statistics, ratings, detailed_examples: (['high', 'medium', 'low'] as const).flatMap(group => selected[group].slice(0, perGroup).map(id => {
     const item = details.get(id)!;
-    return { ...item, overview: item.overview && overviewLimit ? [...item.overview].slice(0, overviewLimit).join('') : null };
+    return reviewExample(item, includeReviews ? reviews : new Map(), overviewLimit);
   })), contrast_pairs: allPairs.slice(0, pairLimit) });
+  const requestBytes = (value: unknown, prompt: string) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: prompt }, { role: 'user', content: JSON.stringify(value) }], text: { format: PROFILE_FORMAT } }), 'utf8');
+  // Compute the old bounded preparation independently so comparisons use the same data/limits.
+  while (requestBytes(makeContext(false), TASTE_SYSTEM_PROMPT) > maxBytes) {
+    if (overviewLimit > 0) overviewLimit = overviewLimit > 150 ? Math.floor(overviewLimit / 2) : 0;
+    else if (perGroup > 0) perGroup--;
+    else if (pairLimit > 0) pairLimit--;
+    else throw new Error('All ratings plus required prompt/schema exceed the input byte limit; no ratings were dropped.');
+  }
+  const baselineBytes = requestBytes(makeContext(false), TASTE_SYSTEM_PROMPT);
   let context = makeContext();
-  const inputFor = () => [{ role: 'system', content: TASTE_SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify(context) }];
+  const inputFor = () => [{ role: 'system', content: TASTE_SYSTEM_PROMPT + (reviews.size ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
   const size = () => Buffer.byteLength(JSON.stringify({ input: inputFor(), text: { format: PROFILE_FORMAT } }), 'utf8');
+  trimReviewExcerpts(context.detailed_examples, size() - reviewInputBudget(baselineBytes, context.detailed_examples));
   while (size() > maxBytes) {
     if (overviewLimit > 0) overviewLimit = overviewLimit > 150 ? Math.floor(overviewLimit / 2) : 0;
     else if (perGroup > 0) perGroup--;
     else if (pairLimit > 0) pairLimit--;
     else throw new Error('All ratings plus required prompt/schema exceed the input byte limit; no ratings were dropped.');
     context = makeContext();
+    trimReviewExcerpts(context.detailed_examples, size() - reviewInputBudget(baselineBytes, context.detailed_examples));
   }
   const input = inputFor(); const inputBytes = size();
-  const fingerprint = createHash('sha256').update(JSON.stringify({ prompt_version: PROMPT_VERSION, schema_version: PROFILE_SCHEMA_VERSION, input, format: PROFILE_FORMAT })).digest('hex');
-  return { context, snapshot, fingerprint, input, inputBytes, summary: { ...statistics, detailed_examples: context.detailed_examples.length,
+  const fingerprint = createHash('sha256').update(JSON.stringify({ prompt_version: PROMPT_VERSION, schema_version: PROFILE_SCHEMA_VERSION, input, format: PROFILE_FORMAT, ...(reviewsSnapshot.length ? { reviews_snapshot: reviewsSnapshot } : {}) })).digest('hex');
+  return { context, exampleOverviews: new Map(makeContext(false).detailed_examples.map(row => [row.movie_id, row.overview])), snapshot, reviewsSnapshot, fingerprint, input, inputBytes, summary: { ...statistics, detailed_examples: context.detailed_examples.length,
     example_groups: Object.fromEntries((['high', 'medium', 'low'] as const).map(group => [group, Math.min(perGroup, selected[group].length)])),
-    contrast_pairs: context.contrast_pairs.length, overview_limit: overviewLimit, input_bytes: inputBytes, max_input_bytes: maxBytes,
+    contrast_pairs: context.contrast_pairs.length, overview_limit: overviewLimit, input_bytes: inputBytes, max_input_bytes: maxBytes, review_context: reviewContextSize(baselineBytes, inputBytes),
     estimated_input_tokens: Math.ceil(inputBytes / 3), token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count. Schema and prompts included.' } };
 }
 export type TasteContext = ReturnType<typeof buildTasteContext>;

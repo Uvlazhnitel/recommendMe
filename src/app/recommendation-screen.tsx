@@ -93,7 +93,7 @@ export default function RecommendationScreen() {
     {!error && data?.generation.state === 'failed' ? <p className="readiness-notice" role="status">Последняя попытка подбора завершилась ошибкой. Предыдущая подборка сохранена. Новый платный запуск требует отдельного подтверждения.</p> : null}
     {blocked ? <p className="readiness-notice" role="status">Предыдущий подбор не завершился. Нужно проверить процесс сервера и оставшуюся блокировку; автоматического повтора не будет.</p> : null}
     {data?.generation.recoverable_save && data.generation.request_id ? <Button tone="light" disabled={busy || acting} onClick={() => { void start(data.generation.request_id!, true); }}>Повторить сохранение без AI</Button> : null}
-    {data?.readiness.profile_refresh?.status === 'refresh_recommended' ? <p className="readiness-notice">Профиль вкуса стоит обновить. Новые оценки уже учитываются в подборе; автоматического пересчёта нет.</p> : null}
+    {data?.readiness.profile_refresh?.status === 'refresh_recommended' ? <p className="readiness-notice">Профиль вкуса стоит обновить. Новые оценки и выбранные впечатления учитываются в подборе; автоматического пересчёта нет.</p> : null}
     {error && !busy ? <Button tone="quiet" disabled={acting} onClick={() => { setError(''); void refresh(); }}>Проверить состояние</Button> : null}
     <dialog ref={dialog} className="paid-confirmation" aria-labelledby="paid-heading" aria-describedby="paid-description" onKeyDown={event => {
       if (event.key !== 'Tab') return;

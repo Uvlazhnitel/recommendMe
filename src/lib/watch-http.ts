@@ -1,3 +1,4 @@
+import { REVIEW_BODY_BYTES, ReviewError } from './movie-review';
 import { openDatabase } from './db';
 import { JsonInputError, readJsonBody } from './http-json';
 import { confirmMovieWatch, validateWatchInput, WatchError } from './movie-watch';
@@ -9,11 +10,11 @@ export function watchHandler(dependencies: { open?: typeof openDatabase; backup?
     try {
       const { id } = await context.params;
       if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) throw new WatchError('invalid_watch');
-      const body = await readJsonBody(request);
-      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'rating_100')) throw new WatchError('invalid_watch');
+      const body = await readJsonBody(request, REVIEW_BODY_BYTES);
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['rating_100', 'review_text'].includes(key))) throw new WatchError('invalid_watch');
       input = validateWatchInput({ ...body, movie_id: Number(id), watched: true });
     } catch (error) {
-      return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_watch' }, error instanceof JsonInputError ? error.status : 400);
+      return reply({ error: error instanceof JsonInputError || error instanceof ReviewError ? error.code : 'invalid_watch' }, error instanceof JsonInputError ? error.status : 400);
     }
     let db: ReturnType<typeof openDatabase> | undefined;
     try {

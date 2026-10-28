@@ -22,13 +22,13 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
-button, input, select { font: inherit; }
-button, a, input, select, summary { -webkit-tap-highlight-color: transparent; }
+button, input, select, textarea { font: inherit; }
+button, a, input, select, textarea, summary { -webkit-tap-highlight-color: transparent; }
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .46; }
 :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 5px; }
-button, input, select { border-radius: var(--radius-control); }
+button, input, select, textarea { border-radius: var(--radius-control); }
 h1, h2, h3, p { margin: 0; }
 h1, h2, h3 { line-height: 1.18; font-weight: 800; letter-spacing: -.035em; }
 h1 { font-size: clamp(32px, 5.6vw, 48px); }
@@ -124,8 +124,8 @@ img { max-width: 100%; }
 .search-form { display: grid; grid-template-columns: minmax(0, 1fr) 145px; gap: 14px; align-items: end; }
 .search-form > .button { grid-column: 1 / -1; }
 label { display: block; color: var(--color-text); font-size: 13px; font-weight: 650; }
-input, select { display: block; width: 100%; min-height: 48px; background: var(--color-surface); color: var(--color-text); border: var(--border); padding: 11px 14px; margin-top: 8px; font-size: 16px; line-height: 1.5; }
-input::placeholder { color: #858792; }
+input, select, textarea { display: block; width: 100%; min-height: 48px; background: var(--color-surface); color: var(--color-text); border: var(--border); padding: 11px 14px; margin-top: 8px; font-size: 16px; line-height: 1.5; }
+input::placeholder, textarea::placeholder { color: #858792; }
 label .muted { font-weight: 400; font-size: 11px; }
 .film-list { list-style: none; margin: 20px 0 0; padding: 0; }
 .film-list > li { display: flex; gap: 16px; align-items: center; min-width: 0; padding: 16px 0; border-bottom: var(--border); }
@@ -488,3 +488,7 @@ html:has(.library-workbench) { scroll-padding-bottom: calc(var(--nav-height) + e
   .library-filter-row { margin-top: 16px; gap: 12px; }
   .library-results-bar { margin-bottom: 16px; }
 }
+
+.review-field { margin-top: 20px; }
+.review-field textarea { resize: vertical; min-height: 132px; overflow-wrap: anywhere; }
+.score-form > .field-help { width: 100%; margin-bottom: 12px; }

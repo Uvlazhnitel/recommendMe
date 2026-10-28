@@ -44,7 +44,7 @@ function mock(ids=[201],handler?:()=>void){
   }) as typeof fetch}};
 }
 const count=(db:Database.Database,table='recommendations')=>(db.prepare(`SELECT count(*) n FROM ${table}`).get() as {n:number}).n;
-const personal=(db:Database.Database)=>db.prepare('SELECT * FROM user_movies ORDER BY movie_id').all();
+const personal=(db:Database.Database)=>db.prepare('SELECT * FROM user_movies ORDER BY movie_id').all().map(row=>({review_text:null,...row as object}));
 const snapshot=(db:Database.Database)=>['movies','user_movies','recommendations','taste_profile'].map(table=>db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all());
 
 test('migration 3→4 preserves existing rows; legacy history is readable and the new key is unique',()=>{

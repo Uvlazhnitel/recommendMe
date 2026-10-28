@@ -19,7 +19,7 @@ export function assertWriteOrigin(request: Request) {
   }
 }
 /** Shared write boundary: Origin validation and a bounded JSON body. */
-export async function readJsonBody(request: Request): Promise<unknown> {
+export async function readJsonBody(request: Request, maxBytes = 1024): Promise<unknown> {
   assertWriteOrigin(request);
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new JsonInputError('expected_json');
   const reader = request.body?.getReader();
@@ -30,7 +30,7 @@ export async function readJsonBody(request: Request): Promise<unknown> {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > 1024) { await reader.cancel(); throw new JsonInputError('request_too_large'); }
+      if (bytes > maxBytes) { await reader.cancel(); throw new JsonInputError('request_too_large'); }
       chunks.push(value);
     }
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));

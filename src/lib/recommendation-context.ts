@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { MovieCandidate } from './candidates';
 import { prepareTasteInputs } from './candidate-context';
+import { reviewExample, REVIEW_GUIDANCE, reviewContextSize, trimReviewExcerpts, reviewInputBudget } from './review-context';
 import { rankingFormat, RANKING_LIMITS } from './recommendation-schema';
 
 const RANKING_PROMPT = `Rank the supplied verified movie candidates for this specific person's taste. Write explanations in English and return only the specified JSON. Select 1-5 films, best personal fit first; fewer than five is preferable to weak quota filler. Choose only from the supplied candidate TMDB IDs; never invent, search for, or substitute films.
@@ -38,9 +39,9 @@ export function buildRankingContext(db: Database.Database, candidates: MovieCand
   const related = relatedExamples(db, candidates, [...high, ...low], personal.byId);
   const format = rankingFormat(candidates.map(row => row.tmdb_id));
   let candidateOverview = 1200, exampleOverview = 600, relatedLimit = 10, perGroup = 10, pairs = 6;
-  const makeContext = () => {
-    const examples = [...high.slice(0, perGroup), ...low.slice(0, perGroup)].map(row => ({ ...row, overview: truncate(row.overview, exampleOverview) }));
-    const relatedSelected = related.slice(0, relatedLimit).map(row => ({ ...row, overview: truncate(row.overview, exampleOverview) }));
+  const makeContext = (includeReviews = true) => {
+    const examples = [...high.slice(0, perGroup), ...low.slice(0, perGroup)].map(row => reviewExample(row, includeReviews ? personal.reviews : new Map(), exampleOverview, includeReviews ? personal.changedReviews : new Set()));
+    const relatedSelected = related.slice(0, relatedLimit).map(row => reviewExample(row, includeReviews ? personal.reviews : new Map(), exampleOverview, includeReviews ? personal.changedReviews : new Set()));
     const contrasts = personal.taste?.context.contrast_pairs.slice(0, pairs) ?? [];
     const evidenceIds = new Set([...personal.evidenceMovies.map(row => row.movie_id), ...personal.changes.map(row => row.movie_id),
       ...examples.map(row => row.movie_id), ...relatedSelected.map(row => row.movie_id), ...contrasts.flatMap(row => [row.higher.movie_id, row.lower.movie_id])]);
@@ -53,9 +54,20 @@ export function buildRankingContext(db: Database.Database, candidates: MovieCand
       candidates: candidates.map(row => ({ tmdb_id: row.tmdb_id, media_type: row.media_type, title: row.title, original_title: row.original_title, year: row.year,
         overview: truncate(row.overview, candidateOverview), genres: row.genres, runtime: row.runtime, directors: row.directors, vote_count: row.vote_count, popularity: row.popularity })) };
   };
+  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: RANKING_PROMPT }, { role: 'user', content: JSON.stringify(value) }], text: { format } }), 'utf8');
+  while (requestBytes(makeContext(false)) > maxBytes) {
+    if (candidateOverview) candidateOverview = candidateOverview > 300 ? candidateOverview / 2 : 0;
+    else if (exampleOverview) exampleOverview = exampleOverview > 150 ? exampleOverview / 2 : 0;
+    else if (relatedLimit) relatedLimit--;
+    else if (perGroup) perGroup--;
+    else if (pairs) pairs--;
+    else throw new Error('Profile, all rating changes and required candidate fields exceed the ranking input limit; no API call made.');
+  }
+  const baselineBytes = requestBytes(makeContext(false));
   let context = makeContext();
-  const input = () => [{ role: 'system', content: RANKING_PROMPT }, { role: 'user', content: JSON.stringify(context) }];
+  const input = () => [{ role: 'system', content: RANKING_PROMPT + (personal.reviews.size || personal.saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
   const bytes = () => Buffer.byteLength(JSON.stringify({ input: input(), text: { format } }), 'utf8');
+  trimReviewExcerpts([...context.examples, ...context.related_examples], bytes() - reviewInputBudget(baselineBytes, [...context.examples, ...context.related_examples]));
   while (bytes() > maxBytes) {
     if (candidateOverview) candidateOverview = candidateOverview > 300 ? candidateOverview / 2 : 0;
     else if (exampleOverview) exampleOverview = exampleOverview > 150 ? exampleOverview / 2 : 0;
@@ -64,6 +76,7 @@ export function buildRankingContext(db: Database.Database, candidates: MovieCand
     else if (pairs) pairs--;
     else throw new Error('Profile, all rating changes and required candidate fields exceed the ranking input limit; no API call made.');
     context = makeContext();
+    trimReviewExcerpts([...context.examples, ...context.related_examples], bytes() - reviewInputBudget(baselineBytes, [...context.examples, ...context.related_examples]));
   }
   if (!context.current_evidence.length) throw new Error('No current rated evidence is available for ranking; no API call made.');
   const stale = personal.taste?.fingerprint !== personal.saved.context_fingerprint;
@@ -72,6 +85,6 @@ export function buildRankingContext(db: Database.Database, candidates: MovieCand
     summary: { profile_version: personal.saved.profile_version, profile_status: stale ? 'stale' : 'current', ratings_count: personal.rated.length,
       candidates: candidates.length, rating_changes: personal.changes.length, profile_refresh: personal.profileRefresh, high_examples: Math.min(perGroup, high.length), low_examples: Math.min(perGroup, low.length),
       related_examples: context.related_examples.length, contrasts: context.contrasts.length, current_evidence: context.current_evidence.length,
-      input_bytes: bytes(), max_input_bytes: maxBytes, candidate_overview_limit: candidateOverview, example_overview_limit: exampleOverview,
+      review_context: reviewContextSize(baselineBytes, bytes()), input_bytes: bytes(), max_input_bytes: maxBytes, candidate_overview_limit: candidateOverview, example_overview_limit: exampleOverview,
       estimated_input_tokens: Math.ceil(bytes() / 3), token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count.' } };
 }

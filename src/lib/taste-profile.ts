@@ -1,3 +1,4 @@
+import { readReviewTexts, reviewSnapshot, type ReviewSnapshot } from './review-context';
 import { openSync, closeSync, writeFileSync, unlinkSync, fstatSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type Database from 'better-sqlite3';
@@ -5,7 +6,7 @@ import { buildTasteContext, type TasteContext } from './taste-context';
 import { PROFILE_SCHEMA_VERSION, PROMPT_VERSION, validateProfile, type Evidence, type ProfileBody } from './taste-schema';
 import { parseUsage, requestTasteProfile, requireOpenAIConfig, type Usage } from './openai-taste';
 
-export type StoredProfile = ProfileBody & { profile_version: number; generated_at: string; ratings_count: number; ratings_snapshot: Evidence[];
+export type StoredProfile = ProfileBody & { profile_version: number; generated_at: string; ratings_count: number; ratings_snapshot: Evidence[]; reviews_snapshot?: ReviewSnapshot;
   context_fingerprint: string; prompt_version: number; schema_version: number; contrast_pairs_count: number;
   requested_model: string; model: string; response_id: string | null; usage: Usage | null };
 const bodyFields = ['strong_preferences', 'negative_patterns', 'contrasts', 'uncertainties'] as const;
@@ -20,13 +21,16 @@ export function parseStoredProfile(raw: string): StoredProfile {
   try { value = JSON.parse(raw); } catch { throw new Error('Saved taste profile is invalid JSON; use --live --force to replace it.'); }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid saved taste profile.');
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).length !== bodyFields.length + metadataFields.length || [...bodyFields, ...metadataFields].some(key => !Object.hasOwn(record, key))) throw new Error('Invalid saved profile fields.');
+  if (Object.keys(record).filter(key => key !== 'reviews_snapshot').length !== bodyFields.length + metadataFields.length || [...bodyFields, ...metadataFields].some(key => !Object.hasOwn(record, key))) throw new Error('Invalid saved profile fields.');
   if (!positiveInteger(record.profile_version) || !positiveInteger(record.ratings_count) || !positiveInteger(record.prompt_version) || record.schema_version !== PROFILE_SCHEMA_VERSION ||
     typeof record.generated_at !== 'string' || !Number.isFinite(Date.parse(record.generated_at)) || new Date(record.generated_at).toISOString() !== record.generated_at ||
     typeof record.context_fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(record.context_fingerprint) ||
     !Number.isSafeInteger(record.contrast_pairs_count) || (record.contrast_pairs_count as number) < 0 || (record.contrast_pairs_count as number) > 12 ||
     typeof record.requested_model !== 'string' || !record.requested_model.trim() || typeof record.model !== 'string' || !record.model.trim() ||
     (record.response_id !== null && typeof record.response_id !== 'string') || !Array.isArray(record.ratings_snapshot)) throw new Error('Invalid saved profile metadata.');
+  if (record.reviews_snapshot !== undefined && (!Array.isArray(record.reviews_snapshot) ||
+    record.reviews_snapshot.some(row => !row || Object.keys(row).length !== 2 || !positiveInteger(row.movie_id) || typeof row.hash !== 'string' || !/^[a-f0-9]{64}$/.test(row.hash)) ||
+    new Set(record.reviews_snapshot.map(row => row.movie_id)).size !== record.reviews_snapshot.length)) throw new Error('Invalid saved reviews snapshot.');
   const snapshot = record.ratings_snapshot as Evidence[];
   if (snapshot.length !== record.ratings_count || new Set(snapshot.map(row => row?.movie_id)).size !== snapshot.length || snapshot.some(row => !row || Object.keys(row).length !== 2 ||
     !positiveInteger(row.movie_id) || !Number.isSafeInteger(row.rating_100) || row.rating_100 < 0 || row.rating_100 > 100)) throw new Error('Invalid saved ratings snapshot.');
@@ -87,7 +91,7 @@ export async function generateTasteProfile(database: Database.Database, options:
     const result = await requestTasteProfile(context, options);
     const body = validateProfile(result.body, context.snapshot, context.context.contrast_pairs.length > 0);
     const profile = database.transaction(() => {
-      if (buildTasteContext(database).fingerprint !== context.fingerprint) throw new Error('Ratings or analysis context changed during generation. Previous profile retained; no automatic retry.');
+      if (buildTasteContext(database).fingerprint !== context.fingerprint || JSON.stringify(reviewSnapshot(readReviewTexts(database))) !== JSON.stringify(context.reviewsSnapshot)) throw new Error('Ratings, reviews or analysis context changed during generation. Previous profile retained; no automatic retry.');
       if (rawProfile(database) !== priorRaw) throw new Error('Saved profile changed during generation. Previous profile retained.');
       let version = saved?.profile_version ?? 0;
       if (!saved && priorRaw) {
@@ -96,7 +100,7 @@ export async function generateTasteProfile(database: Database.Database, options:
       }
       if (!Number.isSafeInteger(version + 1)) throw new Error('Profile version overflow.');
       const profile: StoredProfile = { ...body, profile_version: version + 1, generated_at: new Date().toISOString(), ratings_count: context.snapshot.length,
-        ratings_snapshot: context.snapshot, context_fingerprint: context.fingerprint, prompt_version: PROMPT_VERSION, schema_version: PROFILE_SCHEMA_VERSION,
+        ratings_snapshot: context.snapshot, reviews_snapshot: context.reviewsSnapshot, context_fingerprint: context.fingerprint, prompt_version: PROMPT_VERSION, schema_version: PROFILE_SCHEMA_VERSION,
         contrast_pairs_count: context.context.contrast_pairs.length, requested_model: options.model!.trim(), model: result.model,
         response_id: result.response_id, usage: result.usage };
       database.prepare('INSERT INTO taste_profile (id,profile_json) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET profile_json=excluded.profile_json').run(JSON.stringify(profile));

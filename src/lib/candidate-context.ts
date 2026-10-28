@@ -3,6 +3,7 @@ import { buildTasteContext } from './taste-context';
 import { readTasteProfile } from './taste-profile';
 import { normalizeTitle } from './tmdb';
 import { recentlyRecommended } from './recommendation-policy';
+import { readReviewTexts, changedReviewIds, reviewSnapshot, reviewChanges, reviewExample, REVIEW_GUIDANCE, reviewContextSize, trimReviewExcerpts, reviewInputBudget } from './review-context';
 import { describeTasteRefresh } from './taste-refresh';
 
 export const CANDIDATE_LIMITS = { llm: 30, tmdb: 25, seeds: 5, details: 55, results: 40, tmdb_requests: 120, input_bytes: 120000 } as const;
@@ -78,24 +79,38 @@ export function prepareTasteInputs(db: Database.Database) {
   const evidenceIds = new Set([...saved.strong_preferences, ...saved.negative_patterns, ...saved.uncertainties].flatMap(item => item.evidence.map(ref => ref.movie_id)));
   saved.contrasts.forEach(pair => { evidenceIds.add(pair.higher.movie_id); evidenceIds.add(pair.lower.movie_id); });
   const evidenceMovies = [...evidenceIds].sort((a, b) => a - b).map(id => ({ movie_id: id, title: byId.get(id)?.title ?? null, year: byId.get(id)?.release_year ?? null, current_rating_100: byId.get(id)?.rating_100 ?? null }));
-  const examples = (taste?.context.detailed_examples ?? []).flatMap(item => {
+  const examples = (taste?.context.detailed_examples ?? []).flatMap(({ review_excerpt: _review, ...item }) => {
+    void _review;
     const row = byId.get(item.movie_id)!;
-    return row.rating_100! >= 80 || row.rating_100! <= 60 ? [{ ...item, title: row.title, year: row.release_year, rating_100: row.rating_100! }] : [];
+    return row.rating_100! >= 80 || row.rating_100! <= 60 ? [{ ...item, overview: taste!.exampleOverviews.get(item.movie_id) ?? null, title: row.title, year: row.release_year, rating_100: row.rating_100! }] : [];
   });
-  const profileRefresh = describeTasteRefresh(changes, taste?.fingerprint === saved.context_fingerprint);
-  return { saved, history, byId, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh };
+  const reviews = readReviewTexts(db);
+  const changedReviews = changedReviewIds(saved.reviews_snapshot ?? [], reviewSnapshot(reviews));
+  const reviewDelta = reviewChanges(saved.reviews_snapshot ?? [], reviewSnapshot(reviews));
+  const profileRefresh = describeTasteRefresh(changes, taste?.fingerprint === saved.context_fingerprint, reviewDelta);
+  return { saved, history, byId, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh, reviews, changedReviews };
 }
 export function buildCandidateContext(db: Database.Database, maxBytes: number = CANDIDATE_LIMITS.input_bytes) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid candidate input byte limit.');
-  const { saved, history, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh } = prepareTasteInputs(db);
+  const { saved, history, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh, reviews, changedReviews } = prepareTasteInputs(db);
   const exclusions = history.filter(row => row.watched || row.not_interested || recentlyRecommended(row.last_recommended_at)).map(row => ({ title: row.title, year: row.release_year }));
   let descriptionLimit = 600, perGroup = 10, pairs = 6, includeExclusions = true;
-  const make = () => ({ profile, profile_evidence_movies: evidenceMovies, rating_changes: changes,
-    examples: [examples.filter(row => row.rating_100 >= 80), examples.filter(row => row.rating_100 <= 60)].flatMap(group => group.slice(0, perGroup).map(row => ({ ...row, overview: descriptionLimit && row.overview ? [...row.overview].slice(0, descriptionLimit).join('') : null }))),
+  const make = (includeReviews = true) => ({ profile, profile_evidence_movies: evidenceMovies, rating_changes: changes,
+    examples: [examples.filter(row => row.rating_100 >= 80), examples.filter(row => row.rating_100 <= 60)].flatMap(group => group.slice(0, perGroup).map(row => reviewExample(row, includeReviews ? reviews : new Map(), descriptionLimit, includeReviews ? changedReviews : new Set()))),
     contrasts: taste?.context.contrast_pairs.slice(0, pairs) ?? [], exclusions: includeExclusions ? exclusions : [] });
+  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify(value) }], text: { format: CANDIDATE_FORMAT } }), 'utf8');
+  while (requestBytes(make(false)) > maxBytes) {
+    if (descriptionLimit > 0) descriptionLimit = descriptionLimit > 150 ? Math.floor(descriptionLimit / 2) : 0;
+    else if (perGroup > 0) perGroup--;
+    else if (pairs > 0) pairs--;
+    else if (includeExclusions) includeExclusions = false;
+    else throw new Error('Saved profile and all rating changes exceed the candidate input byte limit; no API call made.');
+  }
+  const baselineBytes = requestBytes(make(false));
   let context = make();
-  const input = () => [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: JSON.stringify(context) }];
+  const input = () => [{ role: 'system', content: SYSTEM_PROMPT + (reviews.size || saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
   const size = () => Buffer.byteLength(JSON.stringify({ input: input(), text: { format: CANDIDATE_FORMAT } }), 'utf8');
+  trimReviewExcerpts(context.examples, size() - reviewInputBudget(baselineBytes, context.examples));
   while (size() > maxBytes) {
     if (descriptionLimit > 0) descriptionLimit = descriptionLimit > 150 ? Math.floor(descriptionLimit / 2) : 0;
     else if (perGroup > 0) perGroup--;
@@ -103,11 +118,12 @@ export function buildCandidateContext(db: Database.Database, maxBytes: number = 
     else if (includeExclusions) includeExclusions = false;
     else throw new Error('Saved profile and all rating changes exceed the candidate input byte limit; no API call made.');
     context = make();
+    trimReviewExcerpts(context.examples, size() - reviewInputBudget(baselineBytes, context.examples));
   }
   const stale = taste?.fingerprint !== saved.context_fingerprint;
   return { input: input(), context, seeds: selectSeeds(history), history, summary: { profile_version: saved.profile_version,
     profile_status: stale ? 'stale' : 'current', ratings_count: rated.length, rating_changes: changes.length, examples: context.examples.length,
-    contrasts: context.contrasts.length, profile_refresh: profileRefresh, input_bytes: size(), estimated_input_tokens: Math.ceil(size() / 3),
+    contrasts: context.contrasts.length, profile_refresh: profileRefresh, review_context: reviewContextSize(baselineBytes, size()), input_bytes: size(), estimated_input_tokens: Math.ceil(size() / 3),
     token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count.', limits: CANDIDATE_LIMITS },
     warnings: stale ? ['Saved taste profile is stale; current examples and all rating changes override older evidence. No profile regeneration.'] : [] };
 }

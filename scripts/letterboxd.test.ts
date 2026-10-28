@@ -147,7 +147,7 @@ test('migration from version 1 preserves data and includes new date in update tr
     const backup = f.backup();
     await importLetterboxd(f.db, prepareLetterboxd(wh + w, rh + r), backup);
     assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
-    assert.deepEqual(f.db.prepare('SELECT * FROM user_movies WHERE movie_id=1').get(), { ...old, letterboxd_rating_date: null });
+    assert.deepEqual(f.db.prepare('SELECT * FROM user_movies WHERE movie_id=1').get(), { ...old, letterboxd_rating_date: null, review_text: null });
     f.db.exec("UPDATE user_movies SET letterboxd_rating_date='2020-01-01' WHERE movie_id=1");
     assert.notEqual((f.db.prepare('SELECT updated_at FROM user_movies WHERE movie_id=1').get() as { updated_at: string }).updated_at, old.updated_at);
     const saved = new Database(backup, { readonly: true });
