@@ -222,3 +222,21 @@ SQL-only восстановление: тот же подтверждённый 
 `PATCH /api/library/:id/review` принимает ровно `{ "review_text": "исходный текст" }` либо `null`; пустая/пробельная строка очищает поле. Нужен подтверждённый просмотр. Сервер проверяет тип, длину (2000 UTF-16 code units, как HTML maxlength) и запрещает NUL. Пробелы/переносы непустого текста сохраняются. Ответ `{status,movie_id,review_text}`; ошибки используют существующие Origin/no-store/безопасные коды. `POST /api/movies/:id/watch` дополнительно принимает необязательный `review_text`, атомарно с первой оценкой/просмотром. Пропуск поля сохраняет существующую рецензию; маршрут оценок её не изменяет.
 
 Только эти два маршрута допускают до 24 КиБ JSON, включая Unicode/JSON escaping. Остальные сохраняют 1 КиБ. Backup выполняется до миграции, затем короткая IMMEDIATE-транзакция повторяет проверку просмотра. No-op не меняет timestamps и не создаёт backup. Чтение, старт приложения и health не применяют миграции. Никаких изменений реальной базы или деплоя при реализации не выполнялось.
+
+
+## Evaluation — схема 7
+
+`007_evaluation.sql` явно создаёт две STRICT таблицы, без backfill:
+
+| Таблица | Данные и целостность |
+|---|---|
+| recommendation_evaluation | result_id PRIMARY KEY, saved_at UTC, metadata_json с compact versions/actual stage usage/totals. Запись только внутри той же IMMEDIATE-транзакции, что реальные рекомендации. Result_id у recommendations не уникален по строкам, поэтому связь batch обеспечивается атомарной операцией, не невозможным FK к неуникальному столбцу. |
+| recommendation_outcomes | movie_id PRIMARY KEY/FK movies; recommendation_id UNIQUE/FK recommendations; watch_recorded_at; nullable first_rating_recorded_at. Ссылка выбирается в транзакции наблюдения по тому же movie_id; один фильм — один outcome. Числовая оценка не дублируется, читается текущая user_movies.rating_100. |
+
+Чтение, start, health и evaluation:report не мигрируют. HTTP schema guards поддерживают3–7. Существующие явные write paths создают backup перед миграцией; SQL-сбой после миграции откатывает запись/metadata/outcome, но успешно применённая миграция, как прежде, остаётся. Backup/restore через container-db включает обе новые таблицы в schema7 counts и весь SQLite API snapshot; старые manifests схем≤6 сохраняют прежний список четырёх таблиц. Проверено на synthetic6→7, повторе миграции, rollback и восстановлении в пустое назначение.
+
+Не применять миграцию на production автоматически при чтении. Рабочий homeserver этой задачей не изменён. При будущем отдельно разрешённом обновлении сначала согласованный offline backup по существующей инструкции. Образ версии до Evaluation не поддерживает схему7: нельзя откатывать только образ поверх новой схемы без совместимой версии либо проверенного восстановления с учётом новых пользовательских записей.
+
+Необязательный Docker build argument `APP_GIT_SHA` по умолчанию unknown переносится в runtime. Передавать только полный40-символьный SHA соответствующего **чистого коммита**, из которого подготовлен build context; не подставлять HEAD при незакоммиченных изменениях. Без такого release процесса приложение сохраняет unknown, в runtime Git не запускается. При uncommitted разработке этой задачи использовать default unknown. Значение валидируется при фиксации metadata; старые prepared journals сохраняют свои значения и не получают текущий SHA.
+
+CLI evaluation:report следует существующим локальным TS/tsx CLI: запускать из checkout с dev dependencies и явным DATABASE_PATH к существующему приватному согласованному snapshot либо доступной базе в окружении приложения. Docker runtime не включает tsx/dev dependencies; CLI внутри него не заявляется. Для JSON через npm использовать --silent. Отчёт readonly, не вызывает API, не создаёт отсутствующую SQLite и не выполняет миграций. Денежных расчётов и cloud analytics нет. Пример/методика — README/RECOMMENDER.

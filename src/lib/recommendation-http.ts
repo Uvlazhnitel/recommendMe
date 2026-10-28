@@ -15,7 +15,7 @@ export async function setRecommendationRejection(db: Database.Database, tmdbId: 
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}) {
   if (!validTmdbId(tmdbId)) throw new RejectError('invalid_tmdb_id');
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new Error('Rejection requires SQLite schema 3, 4, 5 or 6.');
+  if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw new Error('Rejection requires SQLite schema 3, 4, 5, 6 or 7.');
   const state = db.prepare(`SELECT coalesce(u.not_interested,0) hidden,
     EXISTS(SELECT 1 FROM recommendations r WHERE r.movie_id=m.id AND r.rejected=0) pending_history
     FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id WHERE m.tmdb_id=?`).get(tmdbId) as

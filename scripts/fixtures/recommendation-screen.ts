@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { migrateDatabase } from '../../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../../src/lib/migrations';
 import { buildTasteContext } from '../../src/lib/taste-context';
 import type { MovieCandidate } from '../../src/lib/candidates';
 
@@ -12,12 +12,12 @@ export const movie = (id = 201): MovieCandidate => ({ tmdb_id: id, media_type: '
 export const report = (ids = [201,202]) => ({ mode: 'live', status: 'ok', candidates: ids.map(movie) });
 export const choice = (tmdb_id = 201) => ({ tmdb_id, why_fit: 'A personal parallel supported by your high rating.',
   possible_mismatch: 'The pacing may be less appealing; this remains uncertain.', evidence: [{ movie_id: 1, rating_100: 100 }] });
-export function fixture(version = 6) {
+export function fixture(version = SCHEMA_VERSION) {
   const dir = mkdtempSync(join(tmpdir(), 'recommendations-ui-')), path = join(dir, 'movies.sqlite');
   const db = new Database(path); db.pragma('foreign_keys=ON');
-  if (version === 6) migrateDatabase(db);
+  if (version === SCHEMA_VERSION) migrateDatabase(db);
   else {
-    for (const file of ['001_initial','002_letterboxd_rating_date','003_tmdb_metadata','004_recommendation_memory','005_movie_backdrop'].slice(0,version)) db.exec(readFileSync(`migrations/${file}.sql`, 'utf8'));
+    for (const file of ['001_initial','002_letterboxd_rating_date','003_tmdb_metadata','004_recommendation_memory','005_movie_backdrop','006_movie_reviews','007_evaluation'].slice(0,version)) db.exec(readFileSync(`migrations/${file}.sql`, 'utf8'));
     db.pragma(`user_version=${version}`);
   }
   db.exec(`INSERT INTO movies(id,title,release_year,tmdb_id,media_type,runtime_minutes,overview,genres_json,directors_json) VALUES

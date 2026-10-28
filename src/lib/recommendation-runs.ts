@@ -1,5 +1,5 @@
 // Local HTTP orchestration journal. Private output, never a model prompt/profile or a task queue.
-import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isRequestId } from './recommendation-batches';
@@ -15,6 +15,7 @@ export type StoredRun = {
   request_id: string; started_at: string; stage: RunStage; code?: string; result_id?: string;
   candidates?: Awaited<ReturnType<typeof generateCandidates>>;
   ranking?: Awaited<ReturnType<typeof rankRecommendations>>;
+  technical_usage?: { candidates?: unknown; ranking?: unknown };
   calls?: { openai: number; tmdb: number };
 };
 export class GenerationError extends Error {
@@ -37,6 +38,11 @@ export function runStore(databasePath: string) {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw new GenerationError('generation_state_unavailable'); }
   };
   return {
+    list(): StoredRun[] {
+      if (!existsSync(paths.folder)) return [];
+      return readdirSync(paths.folder).filter(name => name.endsWith('.json') && isRequestId(name.slice(0, -5))).sort()
+        .flatMap(name => { const value = this.read(name.slice(0, -5)); return value ? [value] : []; });
+    },
     read(id: string) {
       if (!isRequestId(id)) throw new GenerationError('invalid_request', 400);
       const run = read(join(paths.folder, `${id}.json`));

@@ -1,3 +1,4 @@
+import { saveEvaluation } from './evaluation-storage';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -112,6 +113,7 @@ export function recordRecommendations(db: Database.Database, candidateReport: un
       report.saved_count++;
     }
     if (!report.would_save_count) report.status = 'skipped';
+    if (!dryRun && !manual && report.saved_count) saveEvaluation(db, resultId, candidateReport, request.result);
     return report;
   });
   return dryRun ? operation.deferred() : operation.immediate();

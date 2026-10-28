@@ -1,7 +1,7 @@
 class OpenAIError extends Error {}
 export const MAX_OUTPUT_TOKENS = 12000;
 export const OPENAI_TIMEOUT_MS = 180000;
-export type Usage = { input_tokens: number | null; output_tokens: number | null };
+export type Usage = { input_tokens: number | null; output_tokens: number | null; total_tokens?: number | null; input_tokens_details?: Record<string, number | null> | null; output_tokens_details?: Record<string, number | null> | null };
 export type OpenAIResult = { body: unknown; model: string; response_id: string | null; usage: Usage | null };
 export function requireOpenAIConfig(apiKey?: string, model?: string) {
   if (!apiKey?.trim()) throw new OpenAIError('OPENAI_API_KEY is not configured in the server environment.');
@@ -19,7 +19,14 @@ function tokenCount(value: unknown): number | null {
 export function parseUsage(value: unknown): Usage | null {
   if (value === undefined || value === null) return null;
   const usage = record(value);
-  return { input_tokens: tokenCount(usage.input_tokens), output_tokens: tokenCount(usage.output_tokens) };
+  const details = (value: unknown): Record<string, number | null> | null => {
+    if (value === null || value === undefined) return null;
+    return Object.fromEntries(Object.entries(record(value)).filter(([key, value]) => ['cached_tokens', 'reasoning_tokens'].includes(key) || value === null || typeof value === 'number').map(([key, value]) => [key, tokenCount(value)]));
+  };
+  return { input_tokens: tokenCount(usage.input_tokens), output_tokens: tokenCount(usage.output_tokens),
+    ...(Object.hasOwn(usage, 'total_tokens') ? { total_tokens: tokenCount(usage.total_tokens) } : {}),
+    ...(Object.hasOwn(usage, 'input_tokens_details') ? { input_tokens_details: details(usage.input_tokens_details) } : {}),
+    ...(Object.hasOwn(usage, 'output_tokens_details') ? { output_tokens_details: details(usage.output_tokens_details) } : {}) };
 }
 export type OpenAIOptions = { apiKey?: string; model?: string; fetch?: typeof fetch; timeoutMs?: number };
 export type StructuredRequest = { input: { role: string; content: string }[]; format: unknown; maxInputBytes: number };

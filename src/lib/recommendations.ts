@@ -1,3 +1,4 @@
+import { stageEvaluation, type StageEvaluation } from './evaluation-metadata';
 import type Database from 'better-sqlite3';
 import { blockedReason, readCandidateHistory } from './candidate-context';
 import { buildRankingContext } from './recommendation-context';
@@ -25,7 +26,7 @@ export async function rankRecommendations(db: Database.Database, candidateReport
     if (reason) diagnostics.push({ stage: 'input', tmdb_id: movie.tmdb_id, reason });
     return !reason;
   });
-  const result = { mode: options.live ? 'live' : 'dry-run', status: 'ok' as 'ok' | 'error', recommendations: [] as RankedRecommendation[], diagnostics,
+  const result = { evaluation: null as StageEvaluation | null, mode: options.live ? 'live' : 'dry-run', status: 'ok' as 'ok' | 'error', recommendations: [] as RankedRecommendation[], diagnostics,
     errors: [] as string[], warnings: [...parsed.warnings], context: null as ReturnType<typeof buildRankingContext>['summary'] | null,
     input_count: parsed.input_count, eligible_count: candidates.length, result_id: null as string | null, generated_at: null as string | null, save: null as SaveReport | null,
     readiness: { openai_key: Boolean(options.apiKey?.trim()), openai_model: Boolean(options.model?.trim()) },
@@ -38,11 +39,13 @@ export async function rankRecommendations(db: Database.Database, candidateReport
   if (context.summary.profile_refresh.refresh_recommended) result.warnings.push(`${context.summary.profile_refresh.notice} ${context.summary.profile_refresh.refresh_command}`);
   if (!options.live) return result;
   requireOpenAIConfig(options.apiKey, options.model);
+  result.evaluation = stageEvaluation(context.input, context.format, context.summary);
   if (options.save) await backupForRecommendationWrite(db, options.backupPath);
   try {
     result.statistics.openai_requests = 1;
     const output = await requestStructuredOutput({ input: context.input, format: context.format, maxInputBytes: context.summary.max_input_bytes }, options);
     result.statistics.model = output.model; result.statistics.usage = output.usage;
+    result.evaluation.model = output.model; result.evaluation.usage = output.usage;
     const checked = validateRanking(output.body, candidates, context.snapshot);
     diagnostics.push(...checked.diagnostics);
     // One new SQL snapshot supplies both exclusions and current evidence at return time.

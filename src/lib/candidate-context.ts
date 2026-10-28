@@ -116,7 +116,7 @@ export function buildCandidateContext(db: Database.Database, maxBytes: number = 
     trimReviewExcerpts(context.examples, size() - reviewInputBudget(baselineBytes, context.examples));
   }
   const stale = taste?.fingerprint !== saved.context_fingerprint, rotation = seedRotation(db);
-  return { input: input(), context, seeds: selectSeeds(history, profile, rotation), history, summary: { seed_rotation: rotation, profile_version: saved.profile_version,
+  return { input: input(), context, seeds: selectSeeds(history, profile, rotation), history, summary: { seed_rotation: rotation, profile_version: saved.profile_version, profile_prompt_version: saved.prompt_version, profile_schema_version: saved.schema_version,
     profile_status: stale ? 'stale' : 'current', ratings_count: rated.length, rating_changes: changes.length, examples: context.examples.length,
     contrasts: context.contrasts.length, profile_refresh: profileRefresh, review_context: reviewContextSize(baselineBytes, size()), input_bytes: size(), estimated_input_tokens: Math.ceil(size() / 3),
     token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count.', limits: CANDIDATE_LIMITS },

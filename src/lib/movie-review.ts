@@ -27,7 +27,7 @@ export async function updateMovieReview(db: Database.Database, movieId: number, 
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}) {
   localMovieId(movieId); const review = reviewValue(value);
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (![3, 4, 5, 6].includes(version)) throw new Error('Reviews require SQLite schema 3, 4, 5 or 6.');
+  if (![3, 4, 5, 6, 7].includes(version)) throw new Error('Reviews require SQLite schema 3, 4, 5, 6 or 7.');
   requireWatched(db, movieId);
   const result = (status: 'updated' | 'unchanged') => ({ status, movie_id: movieId, review_text: review });
   if (readReview(db, movieId) === review) return result('unchanged');

@@ -22,7 +22,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export const isRequestId = (value: unknown): value is string => typeof value === 'string' && uuid.test(value);
 export function recommendationSchema(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (![3, 4, 5, 6].includes(version)) throw new Error('Unsupported recommendation schema.');
+  if (![3, 4, 5, 6, 7].includes(version)) throw new Error('Unsupported recommendation schema.');
   return version;
 }
 export function readRecommendationBatch(db: Database.Database, resultId?: string): RecommendationBatch | null {

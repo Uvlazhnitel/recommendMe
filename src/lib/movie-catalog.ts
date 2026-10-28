@@ -33,7 +33,7 @@ export async function addCatalogMovie(db: Database.Database, api: Pick<CatalogAp
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}): Promise<CatalogResult> {
   if (!validTmdbId(tmdbId)) throw new Error('Invalid TMDB ID.');
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new Error('Catalog requires SQLite schema 3, 4, 5 or 6. Run db:init.');
+  if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw new Error('Catalog requires SQLite schema 3, 4, 5, 6 or 7. Run db:init.');
   const found = existing(db, tmdbId);
   if (found) return found;
   const details = await api.details(tmdbId);

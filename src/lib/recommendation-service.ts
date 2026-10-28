@@ -112,12 +112,14 @@ export async function generateRecommendationBatch(requestId: string, dependencie
       store!.write(run);
       run.stage = 'candidates'; store!.write(run);
       const candidates = await generateCandidates(db, { live: true, ...config, openaiFetch: boundedFetch, tmdbFetch: boundedFetch, sleep: boundedSleep });
+      run.technical_usage = { candidates: candidates.mode === 'live' ? candidates.statistics : null };
       checkDeadline();
       if (candidates.mode !== 'live' || candidates.status !== 'ok') throw new GenerationError('candidates_failed', 502);
       if (!candidates.candidates.length) throw new GenerationError('no_candidates', 422);
       run.candidates = candidates; run.stage = 'ranking'; store!.write(run);
       const ranking = await rankRecommendations(db, candidates, { live: true, save: false, apiKey: config.apiKey, model: config.model, fetch: boundedFetch });
       checkDeadline();
+      run.technical_usage = { ...run.technical_usage, ranking: ranking.statistics };
       if (ranking.status !== 'ok' || !ranking.recommendations.length || !ranking.result_id) throw new GenerationError('ranking_failed', 502);
       run.ranking = ranking; run.result_id = ranking.result_id; run.stage = 'saving';
       store!.write(run); // Persist the validated output BEFORE its SQL write, for a free retry.

@@ -14,6 +14,8 @@ RUN npm run build \
     && rm -rf .next/cache
 
 FROM node:24-bookworm-slim AS runtime
+ARG APP_GIT_SHA=unknown
+ENV APP_GIT_SHA=$APP_GIT_SHA
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 DATABASE_PATH=/app/data/movies.sqlite
 COPY --from=build --chown=node:node /app/package.json /app/package-lock.json /app/next.config.mjs ./

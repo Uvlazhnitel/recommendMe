@@ -19,8 +19,8 @@ const errorCode = (code: string) => (error: unknown) => error instanceof Generat
 const noSleep = async () => {};
 const count = (f: ReturnType<typeof fixture>) => (f.db.prepare('SELECT count(*) n FROM recommendations').get() as { n: number }).n;
 
-test('schemas 3–6 read without migration or writes; migration preserves rows and nullable images', () => {
-  for (const version of [3,4,5,6]) {
+test('schemas 3–7 read without migration or writes; migration preserves rows and nullable images', () => {
+  for (const version of [3,4,5,6,7]) {
     const f = fixture(version);
     try {
       const before = readFileSync(f.path), p = personal(f.db);

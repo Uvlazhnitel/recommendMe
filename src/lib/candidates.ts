@@ -1,3 +1,4 @@
+import { stageEvaluation } from './evaluation-metadata';
 import type Database from 'better-sqlite3';
 import { selectVerifiedCandidates } from './candidate-selection';
 import { RECOMMENDATION_REPEAT_DAYS } from './recommendation-policy';
@@ -28,6 +29,7 @@ export function parseCandidateProposals(body: unknown): Proposal[] {
 }
 export async function generateCandidates(db: Database.Database, options: Options = {}) {
   const context = buildCandidateContext(db);
+  const evaluation = stageEvaluation(context.input, CANDIDATE_FORMAT, context.summary);
   const readiness = { openai_key: Boolean(options.apiKey?.trim()), openai_model: Boolean(options.model?.trim()), tmdb_key: Boolean(options.tmdbKey?.trim()) };
   if (!options.live) return { mode: 'dry-run' as const, ...context.summary, readiness, seeds: context.seeds, warnings: context.warnings };
   requireOpenAIConfig(options.apiKey, options.model);
@@ -48,7 +50,7 @@ export async function generateCandidates(db: Database.Database, options: Options
     if (accepted.size > CANDIDATE_LIMITS.results) warnings.push('Verified candidate pool selected locally by metadata support and diversity, capped at 40; no final ranking was performed.');
     return { mode: 'live' as const, status: errors.length ? (candidates.length ? 'partial' : 'error') : 'ok', candidates,
       rejected_by_reason: diagnostics.reduce<Record<string, number>>((counts, item) => { counts[item.reason] = (counts[item.reason] ?? 0) + 1; return counts; }, {}),
-      diagnostics, errors, warnings, selection, seed_selection: { rotation: context.summary.seed_rotation, seeds: context.seeds }, statistics: { openai_requests: 1, tmdb_requests: tmdb.stats.requests,
+      diagnostics, errors, warnings, evaluation, selection, seed_selection: { rotation: context.summary.seed_rotation, seeds: context.seeds }, statistics: { openai_requests: 1, tmdb_requests: tmdb.stats.requests,
         tmdb_failed_requests: tmdb.stats.failedRequests, details_checked: detailsChecked, accepted: candidates.length, verified_before_cap: accepted.size, cap_excluded: selection.excluded_count, sources_before_cap: selection.before, sources_after_cap: selection.after,
         llm_proposals: llmCount, tmdb_proposals: tmdbCount, tmdb_seeds: context.seeds.length,
         model: returnedModel, usage }, context: context.summary };
@@ -57,7 +59,7 @@ export async function generateCandidates(db: Database.Database, options: Options
   try {
     const result = await requestStructuredOutput({ input: context.input, format: CANDIDATE_FORMAT, maxInputBytes: CANDIDATE_LIMITS.input_bytes },
       { apiKey: options.apiKey, model: options.model, fetch: options.openaiFetch, timeoutMs: options.openaiTimeoutMs });
-    usage = result.usage; returnedModel = result.model;
+    usage = result.usage; returnedModel = result.model; evaluation.usage = usage; evaluation.model = returnedModel;
     proposals = parseCandidateProposals(result.body);
     llmCount = proposals.length;
   } catch (error) {

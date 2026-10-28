@@ -1,3 +1,4 @@
+import { observeOutcome } from './evaluation-storage';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -41,7 +42,7 @@ export async function confirmMovieWatch(db: Database.Database, value: unknown,
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}): Promise<WatchResult> {
   const input = validateWatchInput(value);
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new Error('Watch writes require schema 3, 4, 5 or 6.');
+  if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw new Error('Watch writes require schema 3, 4, 5, 6 or 7.');
   const before = current(db, input);
   const stable = unchanged(db, input, before);
   if (stable) return stable;
@@ -60,6 +61,7 @@ export async function confirmMovieWatch(db: Database.Database, value: unknown,
     if (!row) db.prepare('INSERT INTO user_movies(movie_id,watched,rating_100,rating_source) VALUES (?,1,?,?)').run(input.movie_id, rating, source);
     else db.prepare('UPDATE user_movies SET watched=1,rating_100=?,rating_source=? WHERE movie_id=?').run(rating, source, input.movie_id);
     if (input.review_text !== undefined) db.prepare('UPDATE user_movies SET review_text=? WHERE movie_id=?').run(input.review_text, input.movie_id);
+    observeOutcome(db, input.movie_id, row, rating);
     return { status: row ? 'updated' : 'created', movie_id: input.movie_id, watched: true, rating_100: rating, rating_source: source };
   }).immediate();
 }

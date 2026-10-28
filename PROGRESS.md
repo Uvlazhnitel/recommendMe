@@ -50,6 +50,58 @@
 - **Файлы:** src/lib/candidate-selection.ts; scripts/candidates-v2.test.ts; scripts/final-audit.test.ts; scripts/fixtures/final-audit-baseline.json; package.json; README.md; RECOMMENDER.md; PROGRESS.md. Один новый коммит аудита публикуется обычным push после успешных проверок и повторной проверки remote. Серверная публикация не входит в поручение.
 - **Ограничения:** точный набор ID не является семантической группой, новый приоритет может сохранить менее поддержанный вариант вместо поддержанного повтора. При различных наборах support может по-прежнему вытеснить необычную гипотезу. Качество/ожидаемые оценки не измерены; дальнейшие алгоритмы без отдельного решения не добавляются. Следующий шаг — отчёт владельцу, без объединения и деплоя.
 
+## Evaluation v1 — 2026-10-28
+
+- **Статус/границы:** утверждённый план реализован локально в новой feature/evaluation-v1 от чистой feature/candidates-v2 на64a888f. Алгоритмы/Taste Context/seeds/профиль/LLM-prompts и response formats/лимиты/Origin/UI не менялись. Нет новых зависимостей, HTTP-маршрутов, cloud analytics, backtest, денежных расчётов или дополнительных API. Рабочая SQLite и homeserver не обновлялись; commit/push/PR/merge/deploy не выполнялись.
+- **Схема7:** recommendation_evaluation (один result_id, saved_at, compact metadata JSON) и recommendation_outcomes (один movie_id, конкретный recommendation_id, watch/first-rating recorded_at). Старые строки не backfill. Metadata и реальные рекомендации сохраняются в одной SQL-транзакции, сбой metadata откатывает всё; replay/save_only не дублируют/не меняют версию. Backup manifest counts для схемы7 включают обе таблицы, старые snapshots3–6 совместимы; backup/restore и6→7/repeat проверены только на synthetic DB. Read/start/health/CLI не мигрируют, schema guards/fixtures поддерживают3–7.
+- **Версия/usage:** algorithm_id recommendme-2.0-candidates-v2-audit1; candidate selection candidates-v2-audit1. Два stage snapshot хранят фактические profile/prompt/schema versions, system prompt/format SHA-256, returned models, actual usage и build-provided SHA либоunknown. В system fingerprint не копируются user examples; snapshot whitelist не копирует summary/историю. Docker APP_GIT_SHA optional, defaultunknown; SHA передавать только для соответствующего чистого коммита, runtime Git не используется. Подготовленные журналы сохраняют snapshot для recovery; старые отчёты без него никогда не получают текущую версию. input/output/total/cached/reasoning и другие numeric details сохраняются отдельно; optional missing неизвестны. Batch totals известны по каждому полю только при известных двух stages; total при отсутствии API total допустимо вычислить из известных input+output, без повторного сложения cache/reasoning. Для частичных полей report показывает known stages/known sum и mean только complete batch. Известный расход неуспешной попытки остаётся в technical_usage journal и не считается успешной подборкой; полный billing ledger не заявляется.
+- **Результаты:** наблюдение фиксируется только в настоящем переходе watched0→1, при предшествующем NULL rating и существующей AI-рекомендации. Последний уже сохранённый r.id побеждает без timestamp guessing, manual:* и неизвестные result_id не атрибутируются. Факт первой оценки0–100 (включая0) после подтверждения или в той же операции сохраняется отдельно. Обновление/очистка используют текущий score;NULL/непросмотренное/отсутствие proof не становятся0/неудачей. Один фильм — один outcome, период не переносит его к ранней версии. Старые watched/rated, импорт, review edit и no-op не создают событий. updated_at и Letterboxd не считаются доказательством времени просмотра.
+- **CLI:** npm run evaluation:report, --json (через npm --silent), --from/--to UTC с включённым последним днём. Readonly с существующей БД3–7, без API/миграций/создания БД. Модель запуска как у других локальных CLI: checkout +dev dependencies/tsx; минимальный pruned Docker не включает CLI runtime. Метрики batch/recommendations, observed coverage,high/middle/low/unobserved,hit numerator/denominator/%,mean/median,actual known tokens/coverage/means,models/profile versions и только реально встреченные algorithm groups. Manual/unidentified отдельно. Исторические даты recommended_at обозначены как неточные даты сохранения. При n<20 insufficient_data с обязательным предупреждением;20 не объявляется статистической надёжностью. Historical usage читается лишь из единственного matching successful journal,result_id действительно сохранён вSQL; версияunknown, ambiguous/corrupt journal не используется для догадок.
+- **Проверки:** test:db **311/311**, из них26 новых параметризованных Evaluation tests покрывают все20 сценариев задания. lint/typecheck/build и diff --check успешны. Verified freeze/stage-specific models/profiles,old schemas/unknown,SQL rollback,concurrent lock,replay/free recovery,full/partial/absent usage,zero/NULL,до/после,edits/clear,review/import no events,повторы/период,metrics,backup/restore,CLI empty/historical/versions/observed. Новая mocked success выполняет2 OpenAI+5 TMDB для2 кандидатов; прежняя большая fixture остаётся2/73 и все caps5/25/55/120/40/120000. Существующие шесть context fixtures сохраняют input+format bytes/SHA; Evaluation добавляется только вне запросов. Два прежних Turbopack dynamic tracing warnings остаются; служебный next-env.d.ts восстановлен. Браузерный прогон не повторялся, UI не менялся.
+- **Фактические исторические данные:** существующий private readonly audit snapshot schema5 дал2 сохранённые подборки/10 рекомендаций/0 подтверждённых outcomes,algorithmunknown и usageunknown. Исходные519 оценок не признаются результатами recommendMe. Новая реальная генерация не запускалась, платных OpenAI/TMDB вызовов0. Report сохранён только в /tmp, исходный private audit не переписан. Зафиксированы/сверены SHA защищённых SQLite/CSV/env/audit artifacts и refs исходных веток.
+- **Пример на синтетике:**2 batches,2 recommendations,1 observed score90,hit1/1=100%,mean/median90,1unobserved,status insufficient_data. При синтетическом usage100input/20output на каждом из2 stages для2 batches known input400/output80/cached160/reasoning20; это числа fixtures, не реальный расход и не точность рабочей системы. Полный пример вывода есть в test log и README.
+- **Ограничения:** учитывается момент подтверждения в приложении, не реальное время сеанса/причина просмотра. Наблюдательное сравнение смещено выбором просмотренных фильмов и разными периодами/историей вкуса. Исторические unknown не восстанавливаются догадками; технический расход отказов частичен. После оценки или очистки метрики могут измениться по согласованной current-rating методике. Никакого backtest на профиле со всеми519 оценками нет. Следующий шаг — отчёт владельцу; публикация и серверная миграция требуют отдельного поручения.
+
+**Полный список файлов этой задачи:**
+
+- `DATA_AND_DEPLOYMENT.md`
+- `Dockerfile`
+- `IMPLEMENTATION_PLAN.md`
+- `PROGRESS.md`
+- `README.md`
+- `RECOMMENDER.md`
+- `migrations/007_evaluation.sql`
+- `package.json`
+- `scripts/container-db.mjs`
+- `scripts/evaluation-report.ts`
+- `scripts/evaluation.test.ts`
+- `scripts/fixtures/recommendation-screen.ts`
+- `scripts/recommendation-screen.test.ts`
+- `scripts/schema.test.ts`
+- `src/lib/candidate-context.ts`
+- `src/lib/candidates.ts`
+- `src/lib/evaluation-metadata.ts`
+- `src/lib/evaluation-report.ts`
+- `src/lib/evaluation-storage.ts`
+- `src/lib/library.ts`
+- `src/lib/migrations.ts`
+- `src/lib/movie-catalog.ts`
+- `src/lib/movie-review.ts`
+- `src/lib/movie-watch.ts`
+- `src/lib/openai.ts`
+- `src/lib/recommendation-batches.ts`
+- `src/lib/recommendation-context.ts`
+- `src/lib/recommendation-http.ts`
+- `src/lib/recommendation-memory.ts`
+- `src/lib/recommendation-runs.ts`
+- `src/lib/recommendation-service.ts`
+- `src/lib/recommendations.ts`
+- `src/lib/tmdb-enrichment.ts`
+
+## Публикация Evaluation v1 — 2026-10-28
+
+По отдельному запросу владельца подготовлен коммит Evaluation v1 и обычный push в origin/feature/evaluation-v1. Проверки реализации:311/311 тестов, lint/typecheck/build и diff --check успешны. В состав публикации включены только исходники, миграция, синтетические тесты и документация; личные данные/окружение/backup исключены. Сервер и рабочая SQLite не обновляются, миграция7 на них не запускается. Main, PR и merge не затрагиваются.
+
 ## Фазы
 
 - [x] **1. Фундамент и импорт CSV** — Next.js, SQLite, seed, TMDB, сквозная проверка 1.5 и 830/519/311. Docker перенесён в фазу 5.
@@ -74,7 +126,7 @@
 - [x] **5.2. Настоящая библиотека и Tailscale** — сохранены SQLite/профиль/рекомендации/journal, настроен частный HTTPS, backup и restart/recreate проверены; открытие iPhone подтверждено владельцем.
 - [ ] **5. Домашний сервер и приёмка** — Docker, база и бэкапы, телефон/ПК, проверка безопасности.
 
-**Текущая задача:** финальный аудит трёх этапов выполнен в `feature/candidates-v2`, подтверждённая проблема точных повторов исправлена; 285 тестов и обязательные проверки прошли. На homeserver остаётся Candidates v2 до исправления аудита; эта задача не меняет сервер и личные данные.
+**Текущая задача:** Evaluation v1 реализован локально и проверен в feature/evaluation-v1; схема7 только в синтетических БД, отчёт readonly. Рабочие данные и homeserver не изменены, публикация не выполнялась.
 
 **Следующая допустимая задача:** дальнейшая эксплуатационная приёмка и отдельная внешняя копия backup — по поручению владельца. Всю фазу 5 не отмечать автоматически; новых функций и API-запросов не запускать.
 

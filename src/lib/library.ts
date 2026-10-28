@@ -1,3 +1,4 @@
+import { observeOutcome } from './evaluation-storage';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -51,7 +52,7 @@ function summary(row: Row) {
 }
 function schema(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new Error('Library requires SQLite schema 3, 4, 5 or 6.');
+  if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw new Error('Library requires SQLite schema 3, 4, 5, 6 or 7.');
 }
 export function readLibrary(db: Database.Database, params = new URLSearchParams()) {
   const query = parseLibraryQuery(params); schema(db);
@@ -108,6 +109,7 @@ export async function updateLibraryRating(db: Database.Database, movieId: number
     if (row.rating_100 === rating) return result('unchanged', row.rating_source);
     const source = rating === null ? 'none' : 'manual';
     db.prepare('UPDATE user_movies SET rating_100=?,rating_source=? WHERE movie_id=?').run(rating, source, movieId);
+    observeOutcome(db, movieId, row, rating);
     return result('updated', source);
   }).immediate();
 }
