@@ -184,7 +184,7 @@ for(const name of contextScenarios) test(`v1/v2 byte comparison and full-profile
     const before=state(f),old=baseline[name]; f.db.pragma('query_only=ON');
     const c=buildCandidateContext(f.db),r=buildRankingContext(f.db,f.candidates),taste=buildTasteContext(f.db);
     assert.equal(taste.fingerprint,old.taste_fingerprint); assert.equal(taste.inputBytes,old.taste_bytes);
-    assert.equal(c.summary.profile_status,'current'); assert.deepEqual(c.seeds,old.seeds);
+    assert.equal(c.summary.profile_status,'current'); // Candidates v2 owns seed selection; the frozen Taste Context baseline stays intact.
     const status=await generateTasteProfile(f.db,{fetch:async()=>{throw Error('Forbidden real API');}});
     assert.equal(status.cache,'current'); assert.equal(state(f),before);
     assert.ok(c.summary.input_bytes<=old.candidate_bytes*1.05,`${name} candidates ${old.candidate_bytes} -> ${c.summary.input_bytes}`);

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { selectVerifiedCandidates } from './candidate-selection';
 import { RECOMMENDATION_REPEAT_DAYS } from './recommendation-policy';
 import { buildCandidateContext, blockedReason, CANDIDATE_FORMAT, CANDIDATE_LIMITS, readCandidateHistory } from './candidate-context';
 import { requestStructuredOutput, requireOpenAIConfig, type Usage } from './openai';
@@ -41,14 +42,14 @@ export async function generateCandidates(db: Database.Database, options: Options
       const reason = blockedReason({ id, title: movie.title, original_title: movie.original_title, year: movie.year }, history);
       if (reason) { accepted.delete(id); diagnostics.push({ source: movie.source === 'tmdb' ? 'tmdb' : 'llm', title: movie.title, year: movie.year, tmdb_id: id, reason }); }
     }
-    const candidates = [...accepted.values()].slice(0, CANDIDATE_LIMITS.results);
+    const { candidates, selection } = selectVerifiedCandidates([...accepted.values()], history);
     const recent = diagnostics.filter(row => row.reason === 'recently_recommended').length;
     if (recent) warnings.push(`${recent} recently recommended candidates excluded for ${RECOMMENDATION_REPEAT_DAYS} days. No automatic cooldown relaxation.`);
-    if (accepted.size > CANDIDATE_LIMITS.results) warnings.push('Verified candidate list capped at 40 in source order; no final ranking was performed.');
+    if (accepted.size > CANDIDATE_LIMITS.results) warnings.push('Verified candidate pool selected locally by metadata support and diversity, capped at 40; no final ranking was performed.');
     return { mode: 'live' as const, status: errors.length ? (candidates.length ? 'partial' : 'error') : 'ok', candidates,
       rejected_by_reason: diagnostics.reduce<Record<string, number>>((counts, item) => { counts[item.reason] = (counts[item.reason] ?? 0) + 1; return counts; }, {}),
-      diagnostics, errors, warnings, statistics: { openai_requests: 1, tmdb_requests: tmdb.stats.requests,
-        tmdb_failed_requests: tmdb.stats.failedRequests, details_checked: detailsChecked, accepted: candidates.length, verified_before_cap: accepted.size,
+      diagnostics, errors, warnings, selection, seed_selection: { rotation: context.summary.seed_rotation, seeds: context.seeds }, statistics: { openai_requests: 1, tmdb_requests: tmdb.stats.requests,
+        tmdb_failed_requests: tmdb.stats.failedRequests, details_checked: detailsChecked, accepted: candidates.length, verified_before_cap: accepted.size, cap_excluded: selection.excluded_count, sources_before_cap: selection.before, sources_after_cap: selection.after,
         llm_proposals: llmCount, tmdb_proposals: tmdbCount, tmdb_seeds: context.seeds.length,
         model: returnedModel, usage }, context: context.summary };
   };

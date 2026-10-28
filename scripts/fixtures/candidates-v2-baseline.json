@@ -1,0 +1,291 @@
+{
+  "baseline_commit": "2f0bc2f1b8ec70d6e184d4365fd5a3a1704652e4",
+  "scenarios": {
+    "director": {
+      "candidate": {
+        "bytes": 4178,
+        "sha256": "17ba405fe5bfb1770f662f7b80e9c12c08446b61d0676335238947788dbdd3bd"
+      },
+      "ranking": {
+        "bytes": 12000,
+        "sha256": "3d9160bdb503e1b37b522782b55ac34b04c9281de35ae4a67dd92c7e38e74f2e"
+      },
+      "seeds": [
+        {
+          "movie_id": 1,
+          "tmdb_id": 101,
+          "title": "Favourite",
+          "year": 2000
+        }
+      ]
+    },
+    "counterexample": {
+      "candidate": {
+        "bytes": 12390,
+        "sha256": "49a89688416cfb3926c93e8e7e990dfbc01485101d8ca1f028ae5e6b5e86a8d5"
+      },
+      "ranking": {
+        "bytes": 15770,
+        "sha256": "f0480cd8dc573ec1b39a0480e01a16409be08027f20f0ccbf5a8299215fd5444"
+      },
+      "seeds": [
+        {
+          "movie_id": 10,
+          "tmdb_id": 10010,
+          "title": "History 10",
+          "year": 2000
+        },
+        {
+          "movie_id": 1,
+          "tmdb_id": 101,
+          "title": "Favourite",
+          "year": 2000
+        },
+        {
+          "movie_id": 11,
+          "tmdb_id": 10011,
+          "title": "History 11",
+          "year": 2000
+        },
+        {
+          "movie_id": 12,
+          "tmdb_id": 10012,
+          "title": "History 12",
+          "year": 2000
+        },
+        {
+          "movie_id": 13,
+          "tmdb_id": 10013,
+          "title": "History 13",
+          "year": 2000
+        }
+      ]
+    },
+    "redundant": {
+      "candidate": {
+        "bytes": 12993,
+        "sha256": "81b8d1d6bc424d78dcc4efb6c61377e0e4edd027c3d81e1c72bc205540969e8d"
+      },
+      "ranking": {
+        "bytes": 15472,
+        "sha256": "749f73b46ee87dc63f8aa8810402a15d2c93c62ae085c52a3cf8b3329bd46dc5"
+      },
+      "seeds": [
+        {
+          "movie_id": 10,
+          "tmdb_id": 10010,
+          "title": "History 10",
+          "year": 2000
+        },
+        {
+          "movie_id": 11,
+          "tmdb_id": 10011,
+          "title": "History 11",
+          "year": 2000
+        },
+        {
+          "movie_id": 12,
+          "tmdb_id": 10012,
+          "title": "History 12",
+          "year": 2000
+        },
+        {
+          "movie_id": 13,
+          "tmdb_id": 10013,
+          "title": "History 13",
+          "year": 2000
+        },
+        {
+          "movie_id": 14,
+          "tmdb_id": 10014,
+          "title": "History 14",
+          "year": 2000
+        }
+      ]
+    },
+    "reviews": {
+      "candidate": {
+        "bytes": 5209,
+        "sha256": "fb244056164b33b8f8ba49ed4d76979c3bccbe9df71947dec3eecea22fec198b"
+      },
+      "ranking": {
+        "bytes": 13031,
+        "sha256": "0d34a155106d090e80d95045043befc4c666d0cb47b62f0095043f9f0fdcbbe2"
+      },
+      "seeds": [
+        {
+          "movie_id": 1,
+          "tmdb_id": 101,
+          "title": "Favourite",
+          "year": 2000
+        }
+      ]
+    },
+    "sparse": {
+      "candidate": {
+        "bytes": 4148,
+        "sha256": "30fcc94c34021139e452ee96f5e71b1d319b372397be8766cbd7f45062ace9e1"
+      },
+      "ranking": {
+        "bytes": 10170,
+        "sha256": "2948b67ef1053b44e4d01aa0f7ab08030fff3901d117e97d907b1b20ee34032c"
+      },
+      "seeds": [
+        {
+          "movie_id": 1,
+          "tmdb_id": 101,
+          "title": "Favourite",
+          "year": 2000
+        }
+      ]
+    },
+    "large": {
+      "candidate": {
+        "bytes": 27963,
+        "sha256": "10dce8ae35cb60f529f61430aacc34deeaec682ec85adb4ca0e1d73446d4f627"
+      },
+      "ranking": {
+        "bytes": 96378,
+        "sha256": "d70fd00f0e69b4f164779b1faaddcaa535a0e89d1ccf5abf57487fa8a85ea5cc"
+      },
+      "seeds": [
+        {
+          "movie_id": 12,
+          "tmdb_id": 10012,
+          "title": "History 12",
+          "year": 2000
+        },
+        {
+          "movie_id": 15,
+          "tmdb_id": 10015,
+          "title": "History 15",
+          "year": 2000
+        },
+        {
+          "movie_id": 18,
+          "tmdb_id": 10018,
+          "title": "History 18",
+          "year": 2000
+        },
+        {
+          "movie_id": 1,
+          "tmdb_id": 101,
+          "title": "Favourite",
+          "year": 2000
+        },
+        {
+          "movie_id": 21,
+          "tmdb_id": 10021,
+          "title": "History 21",
+          "year": 2000
+        }
+      ]
+    }
+  },
+  "audit44": {
+    "candidate": {
+      "bytes": 6367,
+      "sha256": "94bd0b348809d755aa2f74f636602ff27c650c7dc20e1e545e62a45941a08826"
+    },
+    "ranking": {
+      "bytes": 49654,
+      "sha256": "e27ed998f2eaf2350da49a59ce725c14a1a44bb7a07d5088549e1735d261a770"
+    },
+    "seeds": [
+      {
+        "movie_id": 10,
+        "tmdb_id": 10010,
+        "title": "History 10",
+        "year": 2000
+      },
+      {
+        "movie_id": 11,
+        "tmdb_id": 10011,
+        "title": "History 11",
+        "year": 2000
+      },
+      {
+        "movie_id": 12,
+        "tmdb_id": 10012,
+        "title": "History 12",
+        "year": 2000
+      },
+      {
+        "movie_id": 13,
+        "tmdb_id": 10013,
+        "title": "History 13",
+        "year": 2000
+      },
+      {
+        "movie_id": 14,
+        "tmdb_id": 10014,
+        "title": "History 14",
+        "year": 2000
+      }
+    ],
+    "selected": [
+      1000,
+      1001,
+      1002,
+      1003,
+      1004,
+      1005,
+      1006,
+      1007,
+      1008,
+      1009,
+      1010,
+      1011,
+      1012,
+      1013,
+      1014,
+      1015,
+      1016,
+      1017,
+      1018,
+      1019,
+      1020,
+      1021,
+      1022,
+      1023,
+      2000,
+      2001,
+      2002,
+      2003,
+      2004,
+      2005,
+      2006,
+      2007,
+      2008,
+      2009,
+      2010,
+      2011,
+      2012,
+      2013,
+      2014,
+      2015
+    ],
+    "excluded": [
+      2016,
+      2017,
+      2018,
+      2019
+    ],
+    "statistics": {
+      "openai_requests": 1,
+      "tmdb_requests": 73,
+      "tmdb_failed_requests": 0,
+      "details_checked": 44,
+      "accepted": 40,
+      "verified_before_cap": 44,
+      "llm_proposals": 24,
+      "tmdb_proposals": 20,
+      "tmdb_seeds": 5,
+      "model": "mock-model",
+      "usage": {
+        "input_tokens": 100,
+        "output_tokens": 50
+      }
+    }
+  }
+}

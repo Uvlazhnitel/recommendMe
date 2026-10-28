@@ -6,6 +6,7 @@ import { recentlyRecommended } from './recommendation-policy';
 import { readReviewTexts, changedReviewIds, reviewSnapshot, reviewChanges, reviewExample, REVIEW_GUIDANCE, reviewContextSize, trimReviewExcerpts, reviewInputBudget } from './review-context';
 import { examplePool, selectGeneralExamples } from './taste-examples';
 import { describeTasteRefresh } from './taste-refresh';
+import { selectSeeds } from './candidate-selection';
 
 export const CANDIDATE_LIMITS = { llm: 30, tmdb: 25, seeds: 5, details: 55, results: 40, tmdb_requests: 120, input_bytes: 120000 } as const;
 export const CANDIDATE_FORMAT = { type: 'json_schema', name: 'movie_candidates', strict: true, schema: {
@@ -51,17 +52,12 @@ export function blockedReason(movie: { id: number; title: string; original_title
   }
   return null;
 }
-function selectSeeds(history: HistoryRow[]) {
-  const pool = history.filter(row => row.rating_100 !== null && row.rating_100 >= 80 && !row.not_interested && row.tmdb_id !== null && row.media_type === 'movie' && (row.runtime_minutes ?? 0) >= 60);
-  const genres = new Set<string>(), directors = new Set<number>(), selected: HistoryRow[] = [];
-  const metadata = (row: HistoryRow) => ({ genres: JSON.parse(row.genres_json ?? '[]') as { name: string }[], directors: JSON.parse(row.directors_json ?? '[]') as { id: number }[] });
-  const novelty = (row: HistoryRow) => { const meta = metadata(row); return meta.directors.filter(person => !directors.has(person.id)).length * 3 + meta.genres.filter(genre => !genres.has(genre.name)).length; };
-  while (pool.length && selected.length < CANDIDATE_LIMITS.seeds) {
-    pool.sort((a, b) => novelty(b) - novelty(a) || b.rating_100! - a.rating_100! || a.id - b.id);
-    const row = pool.shift()!; selected.push(row);
-    const meta = metadata(row); meta.genres.forEach(genre => genres.add(genre.name)); meta.directors.forEach(person => directors.add(person.id));
-  }
-  return selected.map(row => ({ movie_id: row.id, tmdb_id: row.tmdb_id!, title: row.title, year: row.release_year }));
+export function seedRotation(db: Database.Database): number {
+  if ((db.pragma('user_version', { simple: true }) as number) < 4) return 0;
+  const rows = db.prepare(`SELECT result_id,why_fit,possible_mismatch FROM recommendations
+    WHERE result_id IS NOT NULL AND result_id NOT LIKE 'manual:%'`).all() as
+    { result_id: string; why_fit: string | null; possible_mismatch: string | null }[];
+  return new Set(rows.filter(row => row.why_fit?.trim() && row.possible_mismatch?.trim()).map(row => row.result_id)).size;
 }
 // Shared read-only preparation; neither generator calls an API or regenerates a profile here.
 export function prepareTasteInputs(db: Database.Database) {
@@ -119,8 +115,8 @@ export function buildCandidateContext(db: Database.Database, maxBytes: number = 
     context = make();
     trimReviewExcerpts(context.examples, size() - reviewInputBudget(baselineBytes, context.examples));
   }
-  const stale = taste?.fingerprint !== saved.context_fingerprint;
-  return { input: input(), context, seeds: selectSeeds(history), history, summary: { profile_version: saved.profile_version,
+  const stale = taste?.fingerprint !== saved.context_fingerprint, rotation = seedRotation(db);
+  return { input: input(), context, seeds: selectSeeds(history, profile, rotation), history, summary: { seed_rotation: rotation, profile_version: saved.profile_version,
     profile_status: stale ? 'stale' : 'current', ratings_count: rated.length, rating_changes: changes.length, examples: context.examples.length,
     contrasts: context.contrasts.length, profile_refresh: profileRefresh, review_context: reviewContextSize(baselineBytes, size()), input_bytes: size(), estimated_input_tokens: Math.ceil(size() / 3),
     token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count.', limits: CANDIDATE_LIMITS },
