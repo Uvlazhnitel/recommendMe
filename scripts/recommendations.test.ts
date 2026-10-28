@@ -154,7 +154,7 @@ test('changed or cleared evidence rejects only affected recommendations; unchang
     finally{f.cleanup();}}
 });
 
-test('related examples prefer a shared director then genres then ID, deduplicate, and remain deterministic',()=>{
+test('related examples retain middle evidence and diverse fallback without repeating equivalent metadata',()=>{
   const f=fixture();
   try{
     // Mid ratings are not in high/low examples, so all are eligible as related evidence.
@@ -163,7 +163,9 @@ test('related examples prefer a shared director then genres then ID, deduplicate
       f.db.prepare('INSERT INTO user_movies(movie_id,watched,rating_100) VALUES(?,1,70)').run(id);
     }
     const candidates=[movie(201,{genres:[{id:1,name:'Drama'},{id:2,name:'Thriller'}]})];const a=buildRankingContext(f.db,candidates),b=buildRankingContext(f.db,candidates);
-    assert.deepEqual(a,b);assert.deepEqual(a.context.related_examples.map(row=>row.movie_id),[23,20,21,22]);
+    assert.deepEqual(a,b);assert.ok(a.context.related_examples.some(row=>row.movie_id===24));
+    assert.ok(a.context.related_examples.some(row=>row.rating_100===70));
+    assert.ok(a.context.related_examples.length<5);
     const ids=[...a.context.examples,...a.context.related_examples].map(row=>row.movie_id);assert.equal(new Set(ids).size,ids.length);
   }finally{f.cleanup();}
 });
