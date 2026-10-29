@@ -4,10 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { RecommendationBatch } from '@/lib/recommendation-batches';
 import type { recommendationState } from '@/lib/recommendation-service';
-import { HomeGallery, HomeLibrary, trapDialogFocus } from './components/home-gallery';
-import { MOODS, DEFAULT_PREFERENCES, parsePreferences, preferencesLabel, type RecommendationPreferences } from '@/lib/recommendation-preferences';
+import { HomeGallery, HomeLibrary } from './components/home-gallery';
+import { DEFAULT_PREFERENCES, parsePreferences, preferencesLabel, type RecommendationPreferences } from '@/lib/recommendation-preferences';
 import type { RecommendationMovie } from '@/lib/recommendation-batches';
-import { Button, LoadingState, PageHeader } from './components/ui';
+import { Button, LoadingState } from './components/ui';
+import { Icon } from './components/icons';
+import { NewSelectionDialog } from './components/new-selection-dialog';
 import { api, json } from './workbench-api';
 
 type State = ReturnType<typeof recommendationState>;
@@ -22,6 +24,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 export default function RecommendationScreen() {
   const router = useRouter();
+  const [step, setStep] = useState<'preferences' | 'confirmation'>('preferences');
   const [preferences, setPreferences] = useState<RecommendationPreferences>({ ...DEFAULT_PREFERENCES });
   const [confirmation, setConfirmation] = useState<RecommendationPreferences>({ ...DEFAULT_PREFERENCES });
   function changePreferences(patch: Partial<RecommendationPreferences>) { setPreferences(current => ({ ...current, ...patch })); }
@@ -51,7 +54,7 @@ export default function RecommendationScreen() {
   const busy = generating || Boolean(remoteRunning), blocked = data?.generation.state === 'interrupted';
   const canGenerate = data?.readiness.can_generate && !blocked && !data.generation.recoverable_save;
   async function start(requestId: string, saveOnly = false, snapshot = confirmation) {
-    if (lock.current) return;
+    if (lock.current || busy) return;
     lock.current = true; setGenerating(true); setError(''); setNotice(''); setUndoId(null);
     try {
       const value = await request<{ batch: RecommendationBatch | null }>(`/api/recommendations/generate${saveOnly ? '?save_only=1' : ''}`, json({ request_id: requestId, confirmed: true, ...(!saveOnly ? { preferences: snapshot } : {}) }));
@@ -65,10 +68,11 @@ export default function RecommendationScreen() {
       lock.current = false; if (mounted.current) setGenerating(false);
     }
   }
-  function confirm() {
+  function configure() {
     if (lock.current || busy || !canGenerate) return;
-    setConfirmation(parsePreferences(preferences));
+    setStep('preferences');
     dialog.current?.showModal();
+    dialog.current?.querySelector('.selection-dialog-content')?.scrollTo({ top: 0 });
   }
   async function reject(tmdbId: number, undo = false) {
     if (lock.current || busy) return false;
@@ -88,37 +92,26 @@ export default function RecommendationScreen() {
   const readinessMessage = data?.readiness.reason === 'configuration_missing' ? 'Для подбора нужно настроить OpenAI, модель и TMDB на сервере.' :
     data?.readiness.reason === 'ratings_missing' ? 'Для подбора нужны текущие оценки фильмов.' :
     data?.readiness.reason === 'profile_unavailable' ? 'Сохранённый профиль вкуса пока недоступен. Подготовьте его отдельно через CLI.' : '';
-  return <>
-    <section className="home-intro"><PageHeader title="Что посмотрим сегодня?" description="Выбери настроение — мы учтём его вместе с твоими оценками и рецензиями" />
-      <fieldset className="mood-picker" disabled={busy || acting} aria-label="Настроение"><legend className="sr-only">Настроение</legend>
-        {MOODS.map(mood => <label className={`mood-option${preferences.mood === mood.id ? ' is-selected' : ''}`} key={mood.id}>
-          <input type="radio" name="mood" value={mood.id} checked={preferences.mood === mood.id} onChange={() => changePreferences({ mood: mood.id })} />
-          <span className="mood-symbol" aria-hidden="true">{mood.symbol}</span><span><strong>{mood.title}</strong><span className="mood-description">{mood.description}</span></span>
-        </label>)}
-      </fieldset>
-      <details className="evening-options"><summary>Есть пожелания?</summary><fieldset disabled={busy || acting}><legend className="sr-only">Дополнительные пожелания</legend>
-        <label className="runtime-choice">Длительность<select aria-label="Длительность" value={preferences.max_runtime ?? 'any'} onChange={e => changePreferences({ max_runtime: e.target.value === 'any' ? null : Number(e.target.value) as 100 | 120 })}><option value="any">Любая</option><option value="120">До 2 часов</option><option value="100">До 100 минут</option></select></label>
-        <div className="evening-toggles"><span>Сегодня не хочется</span>{([['avoid_horror', 'Ужасов'], ['avoid_heavy', 'Тяжёлых тем'], ['avoid_slow', 'Слишком медленного кино']] as const).map(([key, title]) => <label key={key}><input type="checkbox" checked={preferences[key]} onChange={e => changePreferences({ [key]: e.target.checked })} />{title}</label>)}</div>
-      </fieldset></details>
-      <div className="home-start"><Button disabled={!canGenerate || busy || acting} onClick={confirm}>{busy ? 'Подбираем фильмы…' : data?.batch ? 'Подобрать ещё' : 'Подобрать фильмы'}</Button><p>С учётом твоего вкуса и сегодняшних пожеланий</p></div>
-    </section>
+  const remaining = data?.batch?.movies.length ?? 0;
+  return <div className="home-v2">
+    <header className="home-v2-heading"><div><h1 id="home-results-title" tabIndex={-1}>{data?.batch ? 'Твоя подборка' : 'Что посмотрим?'}</h1>
+      <p className="home-batch-label" aria-live="polite">{data?.batch ? `${preferencesLabel(data.batch.preferences ?? null)} · ${remaining} ${remaining === 1 ? 'фильм' : remaining > 1 && remaining < 5 ? 'фильма' : 'фильмов'}` : 'Персональное кино под твой вкус и настроение'}</p></div>
+      <Button id="new-selection" disabled={!canGenerate || busy || acting} onClick={configure}><Icon name="plus" />Новая подборка</Button>
+    </header>
     {initialLoading ? <LoadingState>Загрузка сохранённой подборки…</LoadingState> : null}
-    {error ? <div className="state-panel error-panel" role="alert">{error}</div> : null}
-    {busy ? <div className="selection-loading"><LoadingState>Подбираем следующую подборку…</LoadingState><div className="progress-track"><span /></div></div> : null}
-    {!initialLoading ? <HomeGallery batch={data?.batch ?? null} error={error} busy={busy || acting} onWatch={watch} onReject={movie => reject(movie.tmdb_id)} /> : null}
-    {notice ? <div className="recommendation-notice" role="status"><p>{notice}</p>{undoId !== null ? <Button tone="quiet" disabled={acting || busy} onClick={() => { void reject(undoId, true); }}>Отменить</Button> : null}</div> : null}
+    {error ? <div className="error-state" role="alert">{error}</div> : null}
+    {busy ? <div className="selection-loading home-generation-progress"><LoadingState>Подбираем следующую подборку…</LoadingState><div className="progress-track"><span /></div></div> : null}
     {readinessMessage ? <p className="readiness-notice">{readinessMessage}</p> : null}
     {!error && data?.generation.state === 'failed' ? <p className="readiness-notice" role="status">Последняя попытка подбора завершилась ошибкой. Предыдущая подборка сохранена. Новый платный запуск требует отдельного подтверждения.</p> : null}
     {blocked ? <p className="readiness-notice" role="status">Предыдущий подбор не завершился. Нужно проверить процесс сервера и оставшуюся блокировку; автоматического повтора не будет.</p> : null}
     {data?.generation.recoverable_save && data.generation.request_id ? <Button tone="light" disabled={busy || acting} onClick={() => { void start(data.generation.request_id!, true); }}>Повторить сохранение без AI</Button> : null}
-    {data?.readiness.profile_refresh?.status === 'refresh_recommended' ? <p className="readiness-notice">Профиль вкуса стоит обновить. Новые оценки и выбранные впечатления учитываются в подборе; автоматического пересчёта нет.</p> : null}
     {error && !busy ? <Button tone="quiet" disabled={acting} onClick={() => { setError(''); void refresh(); }}>Проверить состояние</Button> : null}
-    <dialog ref={dialog} className="paid-confirmation" aria-labelledby="paid-heading" aria-describedby="paid-description" onKeyDown={trapDialogFocus}>
-      <h2 id="paid-heading">Начать персональный подбор?</h2>
-      <p id="paid-description">Подбор использует платный OpenAI API — обычно два запроса. Стоимость зависит от модели и объёма данных. Автоматического повтора после ошибки не будет.</p>
-      <p className="confirmation-wishes">{preferencesLabel(confirmation)}</p>
-      <div><Button tone="quiet" onClick={() => dialog.current?.close()}>Отмена</Button><Button onClick={() => { dialog.current?.close(); void start(crypto.randomUUID()); }}>Да, подобрать</Button></div>
-    </dialog>
+    {notice ? <div className="recommendation-notice" role="status"><p>{notice}</p>{undoId !== null ? <Button tone="quiet" disabled={acting || busy} onClick={() => { void reject(undoId, true); }}>Отменить</Button> : null}</div> : null}
+    {!initialLoading ? <HomeGallery batch={data?.batch ?? null} error={error} busy={busy || acting} onWatch={watch} onReject={movie => reject(movie.tmdb_id)} /> : null}
+    {data?.readiness.profile_refresh?.status === 'refresh_recommended' ? <details className="home-about"><summary>О подборке</summary><p>Профиль вкуса стоит обновить. Новые оценки и выбранные впечатления учитываются в подборе; автоматического пересчёта нет.</p></details> : null}
+    <NewSelectionDialog busy={busy || acting} dialog={dialog} step={step} preferences={preferences} confirmation={confirmation} onChange={changePreferences}
+      onContinue={() => { if (lock.current || busy || acting) return; setConfirmation(parsePreferences(preferences)); setStep('confirmation'); }} onBack={() => setStep('preferences')}
+      onConfirm={() => { dialog.current?.close(); void start(crypto.randomUUID()); }} />
     {data?.home ? <HomeLibrary home={data.home} /> : null}
-  </>;
+  </div>;
 }

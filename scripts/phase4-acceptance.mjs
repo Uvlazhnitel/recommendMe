@@ -87,7 +87,8 @@ async function saveRating(value) {
 }
 async function clearRating() { await page.getByRole('button',{name:'Очистить оценку',exact:true}).click();await page.getByRole('status').filter({hasText:/Оценка (очищена|не изменилась)/}).waitFor();assert.equal(await rating().inputValue(),''); }
 async function openMovie(title) { await page.getByRole('button',{name:`Подробнее: ${title}`,exact:true}).click();await page.getByRole('dialog').waitFor(); }
-async function dialogOpen() { await page.getByRole('button',{name:/^(Подобрать фильмы|Подобрать ещё)$/}).click();await page.getByRole('dialog').waitFor(); }
+async function configureOpen() { await page.getByRole('button',{name:'Новая подборка',exact:true}).click();await page.getByRole('button',{name:'Продолжить',exact:true}).waitFor();assert.equal(await page.locator('dialog[open]').count(),1); }
+async function dialogOpen() { await configureOpen();await page.getByRole('button',{name:'Продолжить',exact:true}).click();await page.getByRole('button',{name:'Да, подобрать',exact:true}).waitFor();assert.equal(await page.locator('dialog[open]').count(),1); }
 async function generate(settings, expected=201) {
   control(settings);await dialogOpen();const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/recommendations/generate'&&r.request().method()==='POST');
   await page.getByRole('button',{name:'Да, подобрать',exact:true}).click();const result=await response;assert.equal(result.status(),expected);
@@ -110,22 +111,37 @@ try {
   assert.equal(await page.getByRole('link',{name:'Рекомендации',exact:true}).getAttribute('aria-current'),'page');
 
   await dialogOpen();await screenshot('generation-confirmation');
-  assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Отмена');
+  assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('dialog'))));
   for(const key of ['Tab','Tab','Shift+Tab']){await page.keyboard.press(key);const focus=await page.evaluate(()=>({inside:Boolean(document.activeElement.closest('dialog')),tag:document.activeElement.tagName,text:document.activeElement.textContent?.slice(0,50)}));assert.ok(focus.inside,JSON.stringify({key,...focus}));}
-  await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').isVisible(),false);assert.match(await page.evaluate(()=>document.activeElement.textContent),/Подобрать фильмы/);assert.equal(openaiCalls(),0);check('empty → confirmation/Escape/focus restore: zero provider calls');
+  await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').isVisible(),false);assert.match(await page.evaluate(()=>document.activeElement.textContent),/Новая подборка/);assert.equal(openaiCalls(),0);check('empty → confirmation/Escape/focus restore: zero provider calls');
   for(const mood of ['Лёгкое и душевное','Хочу посмеяться','Что-то выдающееся','Есть над чем подумать','Чтобы захватило','Удиви меня']) {
-    await page.getByRole('radio',{name:new RegExp(mood)}).check();await dialogOpen();await page.getByRole('dialog').getByText(mood,{exact:false}).waitFor();await page.keyboard.press('Escape');
+    await configureOpen();await page.getByRole('radio',{name:new RegExp(mood)}).check();await page.getByRole('button',{name:'Продолжить',exact:true}).click();await page.getByRole('dialog').getByText(mood,{exact:false}).waitFor();await page.keyboard.press('Escape');
   }
-  assert.equal(openaiCalls(),0);await page.getByRole('radio',{name:/Хочу посмеяться/}).check();await page.getByText('Есть пожелания?',{exact:true}).click();await page.getByRole('combobox',{name:'Длительность'}).selectOption('120');await dialogOpen();await page.getByRole('dialog').getByText(/До 2 часов/).waitFor();await page.keyboard.press('Escape');await page.getByRole('combobox',{name:'Длительность'}).selectOption('any');
-  check('all six mood selections and cancelled confirmations are free; wishes visible in confirmation');
+  assert.equal(openaiCalls(),0);await configureOpen();await page.getByRole('radio',{name:/Хочу посмеяться/}).check();await page.getByRole('radio',{name:'До 2 часов',exact:true}).check();
+  await page.getByRole('checkbox',{name:'Ужасов',exact:true}).check();await page.getByRole('button',{name:'Продолжить',exact:true}).click();await page.locator('.confirmation-wishes').filter({hasText:/Хочу посмеяться.*До 2 часов.*Без ужасов/}).waitFor();
+  await page.getByRole('button',{name:'Назад',exact:true}).click();assert.ok(await page.getByRole('radio',{name:/Хочу посмеяться/}).isChecked());assert.ok(await page.getByRole('checkbox',{name:'Ужасов',exact:true}).isChecked());
+  await page.keyboard.press('Escape');await configureOpen();assert.ok(await page.getByRole('radio',{name:'До 2 часов',exact:true}).isChecked());await page.getByRole('radio',{name:'Любая',exact:true}).check();await page.getByRole('checkbox',{name:'Ужасов',exact:true}).uncheck();
+  await page.setViewportSize({width:375,height:600});assert.ok(await page.locator('.selection-dialog-content').evaluate(el=>el.scrollHeight>el.clientHeight));assert.ok((await page.getByRole('button',{name:'Продолжить',exact:true}).boundingBox()).y>=0);assert.ok(await page.getByRole('button',{name:'Продолжить',exact:true}).evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight));
+  for(const key of ['Tab','Shift+Tab','Shift+Tab','Tab']){await page.keyboard.press(key);assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('.new-selection-dialog'))));}
+  await page.setViewportSize({width:1440,height:900});await screenshot('new-selection-desktop');await page.keyboard.press('Escape');
+  for(const width of [375,430]){await page.setViewportSize({width,height:932});await configureOpen();await screenshot(`new-selection-${width}`);await page.keyboard.press('Escape');}
+  await page.setViewportSize({width:1440,height:900});assert.equal(openaiCalls(),0);check('two-step dialog: all moods free, draft/Back/Escape persist, low-screen scroll/sticky action/focus, no nested dialogs');
+  await configureOpen();const idle=await state();await page.route('**/api/recommendations',route=>route.fulfill({json:{...idle,generation:{...idle.generation,state:'running',recoverable_save:false}}}));await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await until(async()=>await page.getByRole('button',{name:'Продолжить',exact:true}).isDisabled(),'remote generation disables open form');assert.ok(await page.getByRole('radio',{name:/Хочу посмеяться/}).isDisabled());await page.keyboard.press('Escape');await page.unrouteAll({behavior:'wait'});await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await until(async()=>await page.getByRole('button',{name:'Новая подборка',exact:true}).isEnabled(),'remote generation state clears');assert.equal(openaiCalls(),0);check('generation on another device disables open settings without a paid retry');
   control({delay:1000});await dialogOpen();await page.getByRole('button',{name:'Да, подобрать',exact:true}).dblclick();
   await page.locator('.selection-loading').waitFor();const firstRequest=posts.at(-1);assert.ok(firstRequest?.request_id);
   const duplicate=await page.request.post(base+'/api/recommendations/generate',{data:firstRequest});assert.equal(duplicate.status(),409);
   await page.reload();await until(async()=> (await state()).generation.state==='saved','generation survives reload');await page.locator('.gallery-card').first().waitFor();
   assert.equal(openaiCalls(),2);let first=await state();assert.equal(first.batch.movies.length,5);const firstId=first.batch.result_id;
   assert.equal(first.batch.preferences.mood,'funny');assert.equal(first.batch.preferences.max_runtime,null);
-  await page.getByRole('radio',{name:/Лёгкое и душевное/}).check();assert.match(await page.locator('.home-batch-label').innerText(),/Хочу посмеяться/);assert.equal(openaiCalls(),2);
-  for(const width of [375,430,768,1024,1440]) {await page.setViewportSize({width,height:1000});await page.evaluate(()=>document.fonts.ready);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.equal(await page.locator('.gallery-card').count(),5);await screenshot(`home-5-${width}`,true);}
+  await configureOpen();assert.ok(await page.getByRole('radio',{name:/Удиви меня/}).isChecked());await page.getByRole('radio',{name:/Лёгкое и душевное/}).check();await page.keyboard.press('Escape');assert.match(await page.locator('.home-batch-label').innerText(),/Хочу посмеяться/);assert.equal(openaiCalls(),2);
+  for(const width of [375,430,768,1024,1440]) {await page.setViewportSize({width,height:width>=768?900:812});await page.evaluate(()=>document.fonts.ready);await page.evaluate(()=>scrollTo(0,0));assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.equal(await page.locator('.gallery-card').count(),5);
+    const cards=await page.locator('.gallery-card').evaluateAll(els=>els.map(el=>({x:el.getBoundingClientRect().x,y:el.getBoundingClientRect().y,bottom:el.getBoundingClientRect().bottom,width:el.getBoundingClientRect().width})));
+    const columns=width>=1280?5:width>=768?3:2;assert.equal(cards.filter(c=>Math.abs(c.y-cards[0].y)<1).length,columns);
+    measurements.push({kind:'home_gallery',width,columns,card_width:cards[0].width,first_row_bottom:Math.max(...cards.slice(0,columns).map(c=>c.bottom))});
+    if(width===1440){assert.ok(cards.every(c=>Math.abs(c.y-cards[0].y)<1));assert.ok(cards.every(c=>c.bottom<=900));}
+    if(width<768){const nav=await page.locator('.navigation').boundingBox();assert.ok(cards.slice(0,2).every(c=>c.bottom<=nav.y),'first row fully visible above navigation');}
+    assert.equal(await page.locator('.gallery-card button').count(),5);assert.equal(await page.locator('.gallery-excerpt').count(),0);assert.equal(await page.locator('.favorite-card').count(),4);await screenshot(`home-5-${width}`,true);}
+  for(const [width,columns] of [[320,1],[1280,5]]){await page.setViewportSize({width,height:900});assert.equal(await page.locator('.recommendation-grid').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),columns);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
   await page.setViewportSize({width:1440,height:1000});
   await openMovie(first.batch.movies[0].title);const originalText=first.batch.movies[0].why_fit;assert.equal(await page.locator('.movie-explanation section').first().locator('p').innerText(),originalText);
   for(const key of ['Tab','Tab','Tab','Tab','Shift+Tab']) {await page.keyboard.press(key);assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('.movie-explanation'))));}
@@ -200,7 +216,7 @@ try {
   await page.unrouteAll({behavior:'wait'});await saveRating(85);check('failed rating preserves draft/server value and explicit retry succeeds');
 
   await go('/');const oldBatch=(await state()).batch.result_id;const paidBeforeFailure=openaiCalls();await generate({round:2,mode:'openai_error'},502);assert.equal(openaiCalls(),paidBeforeFailure+1);assert.equal((await state()).batch.result_id,oldBatch);await screenshot('generation-error');
-  await page.getByRole('button',{name:'Проверить состояние'}).click();await until(async()=>await page.getByRole('button',{name:'Подобрать ещё',exact:true}).isEnabled(),'failed generation ready for explicit action');
+  await page.getByRole('button',{name:'Проверить состояние'}).click();await until(async()=>await page.getByRole('button',{name:'Новая подборка',exact:true}).isEnabled(),'failed generation ready for explicit action');
   for(const mode of ['invalid','refusal','incomplete','no_candidates']){const n=openaiCalls();await generate({round:2,mode},mode==='no_candidates'?422:502);assert.equal(openaiCalls(),n+1);assert.equal((await state()).batch.result_id,oldBatch);await page.getByRole('button',{name:'Проверить состояние'}).click();}
   check('provider error, malformed/refused output and no candidates preserve previous batch without automatic retry');
   control({round:2,delay:600});const beforeNew=openaiCalls();await dialogOpen();const secondResponse=page.waitForResponse(r=>r.url()===base+'/api/recommendations/generate'&&r.request().method()==='POST');await page.getByRole('button',{name:'Да, подобрать'}).click();await page.locator('.selection-loading').waitFor();assert.ok(await page.locator('.recommendation-grid').isVisible());assert.equal((await secondResponse).status(),201);await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();assert.equal(openaiCalls(),beforeNew+2);
@@ -232,7 +248,7 @@ try {
   await screenshot('rate-desktop');check('title/year/versions, empty/error TMDB, possible_duplicate, watch 100 and unchanged timestamps');
   // Ten final differences from the snapshot: no automatic profile generation.
   database(db=>{for(let id=4;id<14;id++)db.prepare("UPDATE user_movies SET rating_100=100,rating_source='manual' WHERE movie_id=?").run(id);});
-  const countAtRefresh=openaiCalls();assert.equal((await state()).readiness.profile_refresh.status,'refresh_recommended');await go('/');await page.getByText('Профиль вкуса стоит обновить.',{exact:false}).waitFor();assert.equal(openaiCalls(),countAtRefresh);check('ten rating differences recommend refresh without regenerating profile');
+  const countAtRefresh=openaiCalls();assert.equal((await state()).readiness.profile_refresh.status,'refresh_recommended');await go('/');await page.getByText('О подборке',{exact:true}).click();await page.getByText('Профиль вкуса стоит обновить.',{exact:false}).waitFor();assert.equal(openaiCalls(),countAtRefresh);check('ten rating differences recommend refresh without regenerating profile');
   database(db=>{
     assert.deepEqual(db.prepare('SELECT * FROM taste_profile').get(),fixture.profile);assert.deepEqual(db.prepare('SELECT * FROM movies WHERE id=1').get(),fixture.importedMovie);
     const row=db.prepare('SELECT * FROM user_movies WHERE movie_id=1').get();for(const key of ['watched','watched_at','original_rating_stars','letterboxd_date','letterboxd_rating_date','not_interested','created_at'])assert.equal(row[key],fixture.imported[key],key);
@@ -292,15 +308,16 @@ try {
   assert.ok(homeState.home.favorites.length>0);const favorite=homeState.home.favorites[0];await page.locator('.favorite-card').first().click();await page.waitForURL(base+`/library?movie_id=${favorite.movie_id}`);await rating().waitFor();await go('/');
   await openMovie(homeState.batch.movies[0].title);await page.route('**/api/recommendations/reject',route=>route.fulfill({status:500,json:{error:'synthetic_failure'}}));await page.getByRole('button',{name:'Неинтересно',exact:true}).click();await page.locator('.movie-explanation [role="alert"]').waitFor();assert.equal(await page.locator('.gallery-card').count(),5);await page.unrouteAll({behavior:'wait'});await page.keyboard.press('Escape');
   check('favorites deep link; failed rejection retains modal/card and shows error');
+  const galleryWidths=new Map();for(const width of [375,430,1440]){await page.setViewportSize({width,height:1000});galleryWidths.set(width,(await page.locator('.gallery-card').first().boundingBox()).width);}
   for(const movie of homeState.batch.movies) {
     await openMovie(movie.title);await page.getByRole('button',{name:'Неинтересно',exact:true}).click();await until(async()=>!(await state()).batch.movies.some(m=>m.tmdb_id===movie.tmdb_id),'gallery rejection persisted');await until(async()=>await page.locator('.gallery-card').count()===(await state()).batch.movies.length,'gallery compacted');
-    const n=(await state()).batch.movies.length;if([2,1,0].includes(n)){
+    const n=(await state()).batch.movies.length;if(n>0){for(const width of [375,430,1440]){await page.setViewportSize({width,height:1000});assert.ok(Math.abs((await page.locator('.gallery-card').first().boundingBox()).width-galleryWidths.get(width))<1,'remaining cards retain their width');}}if([4,3,2,1,0].includes(n)){
       for(const width of [375,430,1440]){await page.setViewportSize({width,height:1000});await screenshot(`home-${n}-${width}`,true);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
     }
   }
-  await page.getByRole('heading',{name:'Эту подборку ты уже разобрал',exact:true}).waitFor();assert.ok(await page.getByRole('heading',{name:'Твои любимые фильмы',exact:true}).isVisible());assert.equal(await page.locator('.gallery-card').count(),0);await page.getByRole('button',{name:'Отменить',exact:true}).click();await until(async()=>await page.locator('.gallery-card').count()===1,'undo restores final film');assert.equal(openaiCalls(),freeBefore);
+  await page.getByRole('heading',{name:'Эту подборку ты уже разобрал',exact:true}).waitFor();assert.ok(await page.getByRole('heading',{name:'Из любимого',exact:true}).isVisible());assert.equal(await page.locator('.gallery-card').count(),0);await page.getByRole('button',{name:'Отменить',exact:true}).click();await until(async()=>await page.locator('.gallery-card').count()===1,'undo restores final film');assert.equal(openaiCalls(),freeBefore);
   check('gallery5→4→3→2→1→0 compact layout, empty completion, favorites persist, undo without generation');
-  const realState=await state();await page.route('**/api/recommendations',route=>route.fulfill({json:{...realState,batch:{...realState.batch,preferences:null}}}));await go('/');await page.getByText('Персональная подборка',{exact:true}).waitFor();await page.unrouteAll({behavior:'wait'});
+  const realState=await state();await page.route('**/api/recommendations',route=>route.fulfill({json:{...realState,batch:{...realState.batch,preferences:null}}}));await go('/');await until(async()=>/Персональная подборка/.test(await page.locator('.home-batch-label').innerText()),'historical label');await page.unrouteAll({behavior:'wait'});
   await page.route('**/api/recommendations',route=>route.fulfill({json:{...realState,batch:null,home:{favorites:[],stats:{watched:0,rated:0}}}}));await go('/');await page.getByText('Открыть библиотеку',{exact:true}).waitFor();await screenshot('home-empty-library',true);await page.unrouteAll({behavior:'wait'});assert.equal(openaiCalls(),freeBefore);
   check('historical unlabelled batch and empty home library work without new APIs');
   assert.equal(errors.length,0,errors.join('\n'));report.mock_calls={openai:openaiCalls(),tmdb:calls('api.themoviedb.org')};report.status='passed';

@@ -125,10 +125,10 @@ test('home summary bounded/deterministic: ratings first, diversity among ties, n
 for(const n of [5,4,3,2,1,0])test(`gallery renders ${n} equal cards and preserves full text for details`,()=>{
   const rows=Array.from({length:n},(_,i)=>({...movie(201+i),poster_path:null,backdrop_path:null,movie_id:100+i,why_fit:'Full original explanation',possible_mismatch:'Original uncertainty',genres:['Drama']}));
   const html=renderToStaticMarkup(<HomeGallery batch={{result_id:randomUUID(),generated_at:null,recommended_at:'2020-01-01',time_kind:'recorded',preferences:wishes({mood:'funny'}),total_count:5,hidden_count:5-n,unavailable_count:0,movies:rows}} busy={false} onWatch={()=>{}} onReject={async()=>true}/>);
-  assert.equal((html.match(/class="gallery-card"/g)??[]).length,n);assert.ok(!html.includes('movie-rail'));assert.ok(html.includes('Хочу посмеяться'));if(!n)assert.ok(html.includes('Эту подборку ты уже разобрал'));
+  assert.equal((html.match(/class="gallery-card"/g)??[]).length,n);assert.ok(!html.includes('movie-rail'));assert.equal((html.match(/class="gallery-open"/g)??[]).length,n);assert.ok(!html.includes('Full original explanation'));if(!n)assert.ok(html.includes('Эту подборку ты уже разобрал'));
 });
 test('empty favorites retain compact navigation and true zero counters',()=>{
-  const html=renderToStaticMarkup(<HomeLibrary home={{favorites:[],stats:{watched:0,rated:0}}}/>);assert.ok(html.includes('Открыть библиотеку'));assert.ok(html.includes('Твой киномир'));
+  const html=renderToStaticMarkup(<HomeLibrary home={{favorites:[],stats:{watched:0,rated:0}}}/>);assert.ok(html.includes('Открыть библиотеку'));assert.ok(html.includes('0 просмотрено · 0 оценено'));
 });
 
 test('bounded Unicode contexts retain wishes and every rating change when optional text shrinks', async()=>{
@@ -152,4 +152,10 @@ test('old prepared journal with no wishes can still recover without retroactive 
     delete run.ranking!.preferences;store.write(run);f.db.exec('DROP TRIGGER legacy_fail');
     const res=await generateRecommendationBatch(key,{open:f.open},{saveOnly:true});assert.equal(res.batch?.preferences,null);assert.equal(h.bodies.length,2);
   }finally{f.cleanup();}
+});
+
+test('compact favorites show only first four from server order with genuine personal scores',()=>{
+  const favorites=Array.from({length:6},(_,i)=>({movie_id:i+1,title:`Favorite ${i+1}`,year:2000,poster_path:null,rating_100:100-i}));
+  const html=renderToStaticMarkup(<HomeLibrary home={{favorites,stats:{watched:10,rated:7}}}/>);
+  assert.equal((html.match(/class="favorite-card"/g)??[]).length,4);assert.ok(html.includes('Favorite 1'));assert.ok(html.includes('Favorite 4'));assert.ok(!html.includes('Favorite 5'));assert.ok(html.includes('100/100'));assert.ok(html.includes('10 просмотрено · 7 оценено'));
 });
