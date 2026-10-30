@@ -1,8 +1,7 @@
-import { userId } from '../src/lib/profiles';
+import { userId, requireProfileSchema } from '../src/lib/profiles';
 import { loadEnvConfig } from '@next/env';
 import { parseArgs } from 'node:util';
 import { openDatabase } from '../src/lib/db';
-import { migrateDatabase } from '../src/lib/migrations';
 import { backupForRecommendationWrite, rejectRecommendation } from '../src/lib/recommendation-memory';
 
 async function main() {
@@ -14,8 +13,9 @@ async function main() {
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error('--tmdb-id must be a positive integer.');
   const db = openDatabase();
   try {
+    requireProfileSchema(db);
     if (!db.prepare('SELECT id FROM movies WHERE tmdb_id=?').get(id)) throw new Error('Movie is not in the local library. Record its verified candidate first.');
-    await backupForRecommendationWrite(db); migrateDatabase(db);
+    await backupForRecommendationWrite(db);
     console.log(JSON.stringify(rejectRecommendation(db, profileId, id, values.undo), null, 2));
   } finally { db.close(); }
 }

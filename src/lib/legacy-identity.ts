@@ -7,8 +7,15 @@ export type IdentityCandidate={tmdb_id:number;media_type:'movie'|'tv';title:stri
 export type IdentityDecision={source_id:string;status:'confirmed'|'ambiguous'|'not_found';reason:string;candidates:IdentityCandidate[];selected:IdentityCandidate|null};
 export function decideIdentity(input:IdentityInput,candidates:IdentityCandidate[],complete=true):IdentityDecision{
  const type=input.media_type==='series'?'tv':'movie';
- const byIdentity=new Map<string,IdentityCandidate>();for(const c of candidates){const key=`${c.media_type}:${c.tmdb_id}`,prior=byIdentity.get(key);const best=prior?.verified&&!c.verified?prior:c;byIdentity.set(key,{...best,aliases:[...new Set([...(prior?.aliases??[]),...(c.aliases??[]),...(prior?[prior.title,prior.original_title]:[]),c.title,c.original_title].filter((t):t is string=>typeof t==='string'))]});}const unique=[...byIdentity.values()];
- const exact=unique.filter(c=>c.verified&&c.media_type===type&&input.year!==null&&c.year===input.year&&[c.title,c.original_title,...(c.aliases??[])].some(t=>t!==null&&normalizeTitle(t)===normalizeTitle(input.title)));
+ const byIdentity=new Map<string,IdentityCandidate>();
+ const contradictory=new Set<string>();
+ for(const c of candidates){
+  const key=`${c.media_type}:${c.tmdb_id}`,prior=byIdentity.get(key);
+  if(prior?.verified&&c.verified&&(prior.year!==c.year||normalizeTitle(prior.title)!==normalizeTitle(c.title)||normalizeTitle(prior.original_title??'')!==normalizeTitle(c.original_title??'')))contradictory.add(key);
+  if(!prior||(!prior.verified&&c.verified))byIdentity.set(key,c);
+ }
+ const unique=[...byIdentity.values()];
+ const exact=unique.filter(c=>!contradictory.has(`${c.media_type}:${c.tmdb_id}`)&&c.verified&&c.media_type===type&&input.year!==null&&c.year===input.year&&[c.title,c.original_title].some(t=>t!==null&&normalizeTitle(t)===normalizeTitle(input.title)));
  const status=complete&&exact.length===1?'confirmed':unique.length?'ambiguous':'not_found';
  return {source_id:input.id,status,reason:status==='confirmed'?'unique_exact_title_year_type_details':!complete?'incomplete_search':input.year===null?'source_year_unknown':exact.length>1?'multiple_verified_matches':'no_unique_verified_match',candidates:unique,selected:status==='confirmed'?exact[0]:null};
 }
@@ -35,6 +42,9 @@ export function applyIdentityDecisions(db:Database.Database,user:UserId,sourceKe
   const targetId=known?.id??oldId;
   const target=db.prepare('SELECT * FROM user_movies WHERE user_id=? AND movie_id=?').get(user,targetId) as Record<string,unknown>|undefined;
   if(targetId!==oldId&&target){
+   const assigned=(id:number)=>Boolean(db.prepare('SELECT 1 FROM personal_rating_history WHERE user_id=? AND movie_id=? UNION SELECT 1 FROM legacy_movie_marks WHERE user_id=? AND movie_id=? AND numeric_override=1 LIMIT 1').get(user,id,user,id));
+   if((target.rating_100===null&&old.rating_100!==null&&assigned(targetId))||(old.rating_100===null&&target.rating_100!==null&&assigned(oldId))){conflicts.push({source_id:item.source_id,reason:'cleared_personal_rating'});continue;}
+   if(Number(target.watchlist)!==Number(old.watchlist)){conflicts.push({source_id:item.source_id,reason:'conflicting_watchlist'});continue;}
    const fields=['rating_100','review_text','watched_at','original_rating_stars','letterboxd_date','letterboxd_rating_date'];
    if(fields.some(k=>old[k]!==null&&target[k]!==null&&old[k]!==target[k])){conflicts.push({source_id:item.source_id,reason:'conflicting_personal_values'});continue;}
    // A manual watchlist edit cannot be reconstructed as a preference of another duplicate.
