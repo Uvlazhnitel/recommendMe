@@ -1,3 +1,4 @@
+import { personalScope, type UserId } from './profiles';
 import { reportPreferences } from './recommendation-preferences';
 import type Database from 'better-sqlite3';
 import { parseUsage } from './openai';
@@ -35,19 +36,21 @@ export function evaluationMetadata(candidateReport: unknown, result: unknown) {
       total_tokens: sum(total(a ?? null), total(b ?? null)), cached_input_tokens: sum(a?.input_tokens_details?.cached_tokens, b?.input_tokens_details?.cached_tokens),
       reasoning_tokens: sum(a?.output_tokens_details?.reasoning_tokens, b?.output_tokens_details?.reasoning_tokens) } };
 }
-export function saveEvaluation(db: Database.Database, resultId: string, candidateReport: unknown, result: unknown) {
-  db.prepare('INSERT INTO recommendation_evaluation(result_id,metadata_json) VALUES(?,?)').run(resultId, JSON.stringify(evaluationMetadata(candidateReport, result)));
+export function saveEvaluation(db: Database.Database, userId: UserId, resultId: string, candidateReport: unknown, result: unknown) {
+  personalScope(db, userId);
+  db.prepare('INSERT INTO recommendation_evaluation(user_id,result_id,metadata_json) VALUES(@userId,?,?)').run({userId}, resultId, JSON.stringify(evaluationMetadata(candidateReport, result)));
 }
 
 /** Called only inside the existing write transaction, with the pre-write state. */
-export function observeOutcome(db: Database.Database, movieId: number, before: { watched: number; rating_100: number | null } | undefined, rating: number | null) {
+export function observeOutcome(db: Database.Database, userId: UserId, movieId: number, before: { watched: number; rating_100: number | null } | undefined, rating: number | null) {
+  personalScope(db, userId);
   if ((before?.watched ?? 0) === 0 && (before?.rating_100 ?? null) === null) {
-    const row = db.prepare(`SELECT id FROM recommendations WHERE movie_id=? AND result_id IS NOT NULL AND result_id NOT LIKE 'manual:%'
-      AND length(trim(why_fit))>0 AND length(trim(possible_mismatch))>0 ORDER BY id DESC LIMIT 1`).get(movieId) as { id: number } | undefined;
-    if (row) db.prepare('INSERT OR IGNORE INTO recommendation_outcomes(movie_id,recommendation_id) VALUES(?,?)').run(movieId, row.id);
+    const row = db.prepare(`SELECT id FROM recommendations WHERE user_id=@userId AND movie_id=? AND result_id IS NOT NULL AND result_id NOT LIKE 'manual:%'
+      AND length(trim(why_fit))>0 AND length(trim(possible_mismatch))>0 ORDER BY id DESC LIMIT 1`).get({userId}, movieId) as { id: number } | undefined;
+    if (row) db.prepare('INSERT OR IGNORE INTO recommendation_outcomes(user_id,movie_id,recommendation_id) VALUES(@userId,?,?)').run({userId}, movieId, row.id);
   }
   if ((before?.rating_100 ?? null) === null && rating !== null) {
     db.prepare(`UPDATE recommendation_outcomes SET first_rating_recorded_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE movie_id=? AND first_rating_recorded_at IS NULL`).run(movieId);
+      WHERE user_id=@userId AND movie_id=? AND first_rating_recorded_at IS NULL`).run({userId}, movieId);
   }
 }

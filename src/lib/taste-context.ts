@@ -1,3 +1,4 @@
+import { personalScope, type UserId } from './profiles';
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { readReviewTexts, reviewSnapshot, reviewExample, REVIEW_GUIDANCE, reviewContextSize, trimReviewExcerpts, reviewInputBudget } from './review-context';
@@ -85,11 +86,12 @@ function selectContrasts(rows: Row[], details: Map<number, Metadata>) {
   }).slice(0, 12).map(pair => ({ higher: pair.higher, lower: pair.lower, shared_directors: pair.shared_directors, shared_genres: pair.shared_genres }));
 }
 
-export function buildTasteContext(database: Database.Database, maxBytes = MAX_INPUT_BYTES) {
+export function buildTasteContext(database: Database.Database, userId: UserId, maxBytes = MAX_INPUT_BYTES) {
+  personalScope(database, userId);
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid context byte limit.');
-  const reviews = readReviewTexts(database), reviewsSnapshot = reviewSnapshot(reviews);
+  const reviews = readReviewTexts(database, userId), reviewsSnapshot = reviewSnapshot(reviews);
   const rows = database.prepare(`SELECT m.id movie_id,m.title,m.release_year year,u.rating_100,m.tmdb_id,m.overview,m.genres_json,m.directors_json,m.runtime_minutes
-    FROM movies m JOIN user_movies u ON m.id=u.movie_id WHERE u.rating_100 IS NOT NULL ORDER BY m.id`).all() as Row[];
+    FROM movies m JOIN user_movies u ON m.id=u.movie_id AND u.user_id=@userId WHERE u.rating_100 IS NOT NULL ORDER BY m.id`).all({userId}) as Row[];
   if (!rows.length) throw new Error('No rated works are available for taste analysis.');
   const ratings: Rated[] = rows.map(({ movie_id, title, year, rating_100 }) => ({ movie_id, title, year, rating_100 }));
   const snapshot: Evidence[] = ratings.map(({ movie_id, rating_100 }) => ({ movie_id, rating_100 }));

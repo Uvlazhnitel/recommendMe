@@ -1,3 +1,4 @@
+import { personalScope, type UserId } from './profiles';
 import { parsePreferences, preferenceExclusion, type RecommendationPreferences } from './recommendation-preferences';
 import { stageEvaluation } from './evaluation-metadata';
 import type Database from 'better-sqlite3';
@@ -28,12 +29,13 @@ export function parseCandidateProposals(body: unknown): Proposal[] {
     return { title: row.title.trim(), year: row.year as number };
   });
 }
-export async function generateCandidates(db: Database.Database, options: Options = {}) {
+export async function generateCandidates(db: Database.Database, userId: UserId, options: Options = {}) {
+  personalScope(db, userId);
   const preferences = options.preferences === undefined ? undefined : parsePreferences(options.preferences);
-  const context = buildCandidateContext(db, undefined, preferences);
+  const context = buildCandidateContext(db, userId, undefined, preferences);
   const evaluation = stageEvaluation(context.input, CANDIDATE_FORMAT, context.summary, preferences);
   const readiness = { openai_key: Boolean(options.apiKey?.trim()), openai_model: Boolean(options.model?.trim()), tmdb_key: Boolean(options.tmdbKey?.trim()) };
-  if (!options.live) return { mode: 'dry-run' as const, ...context.summary, readiness, seeds: context.seeds, warnings: context.warnings };
+  if (!options.live) return { user_id: userId, mode: 'dry-run' as const, ...context.summary, readiness, seeds: context.seeds, warnings: context.warnings };
   requireOpenAIConfig(options.apiKey, options.model);
   const tmdb = createTmdbClient(options.tmdbKey, { fetch: options.tmdbFetch, sleep: options.sleep, now: options.now,
     timeoutMs: options.tmdbTimeoutMs, maxRequests: CANDIDATE_LIMITS.tmdb_requests });
@@ -41,7 +43,7 @@ export async function generateCandidates(db: Database.Database, options: Options
   const accepted = new Map<number, MovieCandidate>();
   let usage: Usage | null = null, returnedModel: string | null = null, detailsChecked = 0, llmCount = 0, tmdbCount = 0;
   const finish = () => {
-    const history = readCandidateHistory(db);
+    const history = readCandidateHistory(db, userId);
     for (const [id, movie] of accepted) {
       const reason = blockedReason({ id, title: movie.title, original_title: movie.original_title, year: movie.year }, history) || preferenceExclusion(movie, parsePreferences(preferences));
       if (reason) { accepted.delete(id); diagnostics.push({ source: movie.source === 'tmdb' ? 'tmdb' : 'llm', title: movie.title, year: movie.year, tmdb_id: id, reason }); }
@@ -50,7 +52,7 @@ export async function generateCandidates(db: Database.Database, options: Options
     const recent = diagnostics.filter(row => row.reason === 'recently_recommended').length;
     if (recent) warnings.push(`${recent} recently recommended candidates excluded for ${RECOMMENDATION_REPEAT_DAYS} days. No automatic cooldown relaxation.`);
     if (accepted.size > CANDIDATE_LIMITS.results) warnings.push('Verified candidate pool selected locally by metadata support and diversity, capped at 40; no final ranking was performed.');
-    return { ...(preferences ? { preferences } : {}), mode: 'live' as const, status: errors.length ? (candidates.length ? 'partial' : 'error') : 'ok', candidates,
+    return { user_id: userId, ...(preferences ? { preferences } : {}), mode: 'live' as const, status: errors.length ? (candidates.length ? 'partial' : 'error') : 'ok', candidates,
       rejected_by_reason: diagnostics.reduce<Record<string, number>>((counts, item) => { counts[item.reason] = (counts[item.reason] ?? 0) + 1; return counts; }, {}),
       diagnostics, errors, warnings, evaluation, selection, seed_selection: { rotation: context.summary.seed_rotation, seeds: context.seeds }, statistics: { openai_requests: 1, tmdb_requests: tmdb.stats.requests,
         tmdb_failed_requests: tmdb.stats.failedRequests, details_checked: detailsChecked, accepted: candidates.length, verified_before_cap: accepted.size, cap_excluded: selection.excluded_count, sources_before_cap: selection.before, sources_after_cap: selection.after,

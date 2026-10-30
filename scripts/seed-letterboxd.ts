@@ -1,3 +1,4 @@
+import { userId } from '../src/lib/profiles';
 import { loadEnvConfig } from '@next/env';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -8,8 +9,9 @@ import { importLetterboxd, prepareLetterboxd } from '../src/lib/letterboxd';
 
 async function main() {
   loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
-  const { values } = parseArgs({ options: { ratings: { type: 'string' }, watched: { type: 'string' } }, strict: true });
-  const reportDirectory = resolve('data/import-reports');
+  const { values } = parseArgs({ options: { user: { type: 'string' }, ratings: { type: 'string' }, watched: { type: 'string' } }, strict: true });
+  const profileId = userId(values.user);
+  const reportDirectory = resolve('data/import-reports', profileId);
   const backupDirectory = resolve('data/backups');
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`;
   mkdirSync(reportDirectory, { recursive: true });
@@ -22,7 +24,7 @@ async function main() {
     mkdirSync(backupDirectory, { recursive: true });
     const database = openDatabase();
     try {
-      const result = await importLetterboxd(database, plan, resolve(backupDirectory, `before-letterboxd-${runId}.sqlite`));
+      const result = await importLetterboxd(database, profileId, plan, resolve(backupDirectory, `before-letterboxd-${runId}.sqlite`));
       const report = { ...result, sources: { watched, ratings } };
       writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
       console.log(JSON.stringify(report, null, 2));

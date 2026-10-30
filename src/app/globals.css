@@ -624,3 +624,17 @@ body:has(.home-v2 dialog[open]) { overflow: hidden; }
   .selection-confirm-actions { flex-wrap: wrap; }
 }
 @media (max-width: 359px) { .recommendation-grid { grid-template-columns: minmax(0, 1fr); } .selection-moods { grid-template-columns: minmax(0, 1fr); } }
+
+/* Two fixed household profiles; no authentication UI. */
+.profile-control { margin-left:auto; flex-shrink:0; }
+.profile-control > .button { display:flex; flex-direction:column; gap:2px; min-height:44px; padding:6px 12px; }
+.profile-control strong { font-size:14px; color:var(--color-text); }
+.profile-control span { font-size:12px; color:var(--color-muted); }
+.profile-chooser { max-width:520px; margin:48px auto; }
+.profile-chooser > p,.profile-dialog > p { color:var(--color-muted); margin-top:16px; }
+.profile-choices { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:28px 0; }
+.profile-choices .button { min-height:64px; font-size:20px; }
+.profile-dialog { background:var(--color-surface);color:var(--color-text);border:var(--border);border-radius:16px;padding:28px;width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto; }
+.profile-dialog::backdrop { background:#000b;backdrop-filter:blur(5px); }
+body:has(.profile-dialog[open]) { overflow:hidden; }
+@media(max-width:767px){.profile-control > .button{padding:4px 8px;}.site-header:has(.profile-control){gap:8px;}.profile-control span{font-size:11px;}.profile-chooser{margin:24px auto;}.profile-chooser h1{font-size:30px;}}

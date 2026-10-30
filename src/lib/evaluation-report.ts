@@ -1,3 +1,5 @@
+import { requireProfileSchema } from './profiles';
+import { personalScope, type UserId } from './profiles';
 import type Database from 'better-sqlite3';
 import { evaluationMetadata } from './evaluation-storage';
 import { runStore } from './recommendation-runs';
@@ -46,19 +48,20 @@ function summary(batches: { rows: Row[]; metadata: Metadata }[]) {
     models: [...new Set(stages.flatMap(s => s?.model ? [s.model] : []))].sort(),
     profile_versions: [...new Set(stages.flatMap(s => s?.profile_version ? [s.profile_version] : []))].sort((a, b) => a - b) };
 }
-export function evaluationReport(db: Database.Database, period: EvaluationPeriod = {}) {
+export function evaluationReport(db: Database.Database, userId: UserId, period: EvaluationPeriod = {}) {
+  personalScope(db, userId);
   const bounds = evaluationPeriod(period), version = db.pragma('user_version', { simple: true }) as number;
-  if (version < 3 || version > 7) throw Error('Evaluation report supports schema 3–7.');
+  requireProfileSchema(db);
   const warnings = ['Наблюдательное сравнение: разные периоды, история вкуса и выбор просмотренных фильмов не позволяют установить причинный эффект.',
     'Порог 20 — только предупреждение о малой выборке, не доказательство статистической надёжности.'];
   const rows = db.prepare(`SELECT r.id,${version >= 4 ? 'r.result_id' : 'NULL'} result_id,r.recommended_at,u.rating_100,u.watched,
     ${version >= 7 ? 'o.recommendation_id outcome_id,o.watch_recorded_at,o.first_rating_recorded_at,e.saved_at,e.metadata_json' : 'NULL outcome_id,NULL watch_recorded_at,NULL first_rating_recorded_at,NULL saved_at,NULL metadata_json'}
-    FROM recommendations r LEFT JOIN user_movies u ON u.movie_id=r.movie_id
-    ${version >= 7 ? 'LEFT JOIN recommendation_outcomes o ON o.movie_id=r.movie_id LEFT JOIN recommendation_evaluation e ON e.result_id=r.result_id' : ''}
-    ORDER BY r.id`).all() as Row[];
+    FROM recommendations r LEFT JOIN user_movies u ON u.movie_id=r.movie_id AND u.user_id=@userId
+    ${version >= 7 ? 'LEFT JOIN recommendation_outcomes o ON o.user_id=r.user_id AND o.movie_id=r.movie_id LEFT JOIN recommendation_evaluation e ON e.user_id=r.user_id AND e.result_id=r.result_id' : ''}
+    WHERE r.user_id=@userId ORDER BY r.id`).all({userId}) as Row[];
   const journals = new Map<string, Metadata[]>();
   try {
-    for (const run of runStore(db.name).list()) {
+    for (const run of runStore(db.name, userId).list()) {
       if (!run.ranking?.result_id || run.ranking.status !== 'ok') continue;
       const id = run.ranking.result_id;
       // Old journals can recover factual usage only, not a current version.
@@ -87,7 +90,7 @@ export function evaluationReport(db: Database.Database, period: EvaluationPeriod
   if (total.status === 'insufficient_data') warnings.unshift('Недостаточно наблюдаемых результатов для оценки качества.');
   if (legacyDates) warnings.push('Для исторических записей используется recommended_at: фактическое время сохранения неизвестно.');
   if (invalidDates) warnings.push('Записи с недостоверной датой исключены из периода.');
-  return { report_version: 1, period: { ...period, timezone: 'UTC', cohort: 'saved_batches', rating_state: 'current' },
+  return { user_id: userId, report_version: 1, period: { ...period, timezone: 'UTC', cohort: 'saved_batches', rating_state: 'current' },
     attribution: 'last_saved_ai_recommendation_before_recorded_watch', total,
     algorithms: algorithms.map(algorithm_id => ({ algorithm_id, ...summary(values.filter(b => b.metadata.algorithm_id === algorithm_id)) })),
     manual_recommendations: manual, unidentified_recommendations: unidentified, legacy_date_recommendations: legacyDates,

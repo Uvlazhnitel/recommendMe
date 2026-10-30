@@ -28,20 +28,20 @@ test('malformed, duplicate and unsafe library URL values fail before a library r
 test('830 watched fixtures are paginated server-side, with stable combined filters and every sort', () => {
   const f=libraryFixture();
   try {
-    const all=readLibrary(f.db,new URLSearchParams('limit=25')); assert.equal(all.total,830); assert.equal(all.items.length,25); assert.equal(all.total_pages,34);
-    const ids=new Set<number>(); for(let page=1;page<=34;page++) for(const item of readLibrary(f.db,new URLSearchParams(`page=${page}&limit=25`)).items) { assert.ok(!ids.has(item.movie_id)); ids.add(item.movie_id); }
+    const all=readLibrary(f.db, 'ilya',new URLSearchParams('limit=25')); assert.equal(all.total,830); assert.equal(all.items.length,25); assert.equal(all.total_pages,34);
+    const ids=new Set<number>(); for(let page=1;page<=34;page++) for(const item of readLibrary(f.db, 'ilya',new URLSearchParams(`page=${page}&limit=25`)).items) { assert.ok(!ids.has(item.movie_id)); ids.add(item.movie_id); }
     assert.equal(ids.size,830);
     for(const sort of ['added_desc','added_asc','rating_desc','rating_asc'] as const) {
       const state={...defaultLibraryState,q:'Кинокадр',rated:'true' as const,year:'2002',sort,page:1};
-      const result=readLibrary(f.db,libraryParams(state)); assert.ok(result.items.length); assert.ok(result.items.every(item=>item.year===2002 && item.rating_100!==null));
-      const sorted=readLibrary(f.db,new URLSearchParams(`sort=${sort}&limit=100`)); assert.equal(new Set(sorted.items.map(x=>x.movie_id)).size,100);
+      const result=readLibrary(f.db, 'ilya',libraryParams(state)); assert.ok(result.items.length); assert.ok(result.items.every(item=>item.year===2002 && item.rating_100!==null));
+      const sorted=readLibrary(f.db, 'ilya',new URLSearchParams(`sort=${sort}&limit=100`)); assert.equal(new Set(sorted.items.map(x=>x.movie_id)).size,100);
       if(sort==='rating_asc') assert.equal(sorted.items[0].rating_100,0);
     }
-    const rated=readLibrary(f.db,new URLSearchParams('rated=true')), unrated=readLibrary(f.db,new URLSearchParams('rated=false'));
+    const rated=readLibrary(f.db, 'ilya',new URLSearchParams('rated=true')), unrated=readLibrary(f.db, 'ilya',new URLSearchParams('rated=false'));
     assert.equal(rated.total+unrated.total,830); assert.ok(unrated.items.every(item=>item.rating_100===null));
-    assert.equal(readLibrary(f.db,new URLSearchParams('q=кино%20abc%20100%25_')).items[0].movie_id,10);
-    assert.equal(readLibrary(f.db,new URLSearchParams('q=original%20test')).items[0].movie_id,10);
-    assert.equal(readLibrary(f.db,new URLSearchParams('page=999')).items.length,0);
+    assert.equal(readLibrary(f.db, 'ilya',new URLSearchParams('q=кино%20abc%20100%25_')).items[0].movie_id,10);
+    assert.equal(readLibrary(f.db, 'ilya',new URLSearchParams('q=original%20test')).items[0].movie_id,10);
+    assert.equal(readLibrary(f.db, 'ilya',new URLSearchParams('page=999')).items.length,0);
   } finally {f.cleanup();}
 });
 test('library rating sequence refreshes membership and leaves all Letterboxd fields, profile and history intact', async () => {
@@ -51,20 +51,20 @@ test('library rating sequence refreshes membership and leaves all Letterboxd fie
     const profile=JSON.stringify(f.db.prepare('SELECT * FROM taste_profile').all());
     const history=JSON.stringify(f.db.prepare('SELECT * FROM recommendations').all());
     for(const rating of [90,75,0,null,85,null,null]) {
-      const previous=readLibraryMovie(f.db,1), result=await updateLibraryRating(f.db,1,rating);
+      const previous=readLibraryMovie(f.db, 'ilya',1), result=await updateLibraryRating(f.db, 'ilya',1,rating);
       assert.equal(result.status,previous.rating_100===rating?'unchanged':'updated');
-      const current=readLibraryMovie(f.db,1); assert.equal(current.rating_100,rating); assert.equal(current.watched,true);
-      const filtered=readLibrary(f.db,new URLSearchParams(`q=Favourite&rated=${rating===null?'false':'true'}`)); assert.equal(filtered.total,1);
+      const current=readLibraryMovie(f.db, 'ilya',1); assert.equal(current.rating_100,rating); assert.equal(current.watched,true);
+      const filtered=readLibrary(f.db, 'ilya',new URLSearchParams(`q=Favourite&rated=${rating===null?'false':'true'}`)); assert.equal(filtered.total,1);
     }
     const after=f.db.prepare('SELECT * FROM user_movies WHERE movie_id=1').get() as Record<string,unknown>;
     for(const key of ['watched','watched_at','original_rating_stars','letterboxd_date','letterboxd_rating_date','not_interested','created_at']) assert.equal(after[key],before[key],key);
     assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM taste_profile').all()),profile); assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM recommendations').all()),history);
-    assert.equal(readLibraryMovie(f.db,7).tmdb_id,null);
-    const candidateContext=buildCandidateContext(f.db).context, rankingContext=buildRankingContext(f.db,[movie(999001)]).context;
+    assert.equal(readLibraryMovie(f.db, 'ilya',7).tmdb_id,null);
+    const candidateContext=buildCandidateContext(f.db, 'ilya').context, rankingContext=buildRankingContext(f.db, 'ilya',[movie(999001)]).context;
     for(const context of [candidateContext,rankingContext]) assert.equal(context.rating_changes.find(item=>item.movie_id===1)?.rating_100,null);
     assert.ok(!rankingContext.current_evidence.some(item=>item.movie_id===1));
     assert.ok(rankingContext.current_evidence.some(item=>item.movie_id===2 && item.rating_100===0));
-    const reopened=f.open({readonly:true}); assert.equal(readLibraryMovie(reopened,1).rating_100,null); reopened.close();
+    const reopened=f.open({readonly:true}); assert.equal(readLibraryMovie(reopened, 'ilya',1).rating_100,null); reopened.close();
   } finally {f.cleanup();}
 });
 test('collection fallback includes the title without changing the existing poster fallback', () => {

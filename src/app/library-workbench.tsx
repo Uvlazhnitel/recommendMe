@@ -1,4 +1,5 @@
 'use client';
+import { profilePositionKey } from './profile-requests';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -11,7 +12,7 @@ import { useMovieEditor } from './use-movie-editor';
 import { useLibrary } from './use-library';
 import { defaultLibraryState, libraryScore, librarySorts, libraryUrl, parseLibraryState, type LibraryState } from './library-state';
 
-const positionKey = (url: string) => `recommendMe:library:${url}`;
+const positionKey = profilePositionKey;
 function remember(url: string, id?: number) {
   try { sessionStorage.setItem(positionKey(url), JSON.stringify({ y: window.scrollY, id })); } catch { /* Browsing still works when storage is disabled. */ }
 }

@@ -15,9 +15,9 @@ function fixture() {
   mkdirSync(data);
   const db = new Database(path); db.pragma('foreign_keys=ON'); migrateDatabase(db);
   db.exec(`INSERT INTO movies(id,title) VALUES(1,'Synthetic Zero'),(2,'Synthetic Unrated');
-    INSERT INTO user_movies(movie_id,watched,rating_100) VALUES(1,1,0),(2,1,NULL);
-    INSERT INTO recommendations(movie_id,result_id,why_fit,possible_mismatch) VALUES(1,'legacy:test','Test fit','Test risk');
-    INSERT INTO taste_profile(profile_json) VALUES('{"synthetic":true}')`);
+    INSERT INTO user_movies(user_id,movie_id,watched,rating_100) VALUES('ilya',1,1,0),('ilya',2,1,NULL);
+    INSERT INTO recommendations(user_id,movie_id,result_id,why_fit,possible_mismatch) VALUES('ilya',1,'legacy:test','Test fit','Test risk');
+    INSERT INTO taste_profile(user_id,profile_json) VALUES('ilya','{"synthetic":true}')`);
   db.close();
   return { root, data, path, backups: join(root, 'backups'), cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }

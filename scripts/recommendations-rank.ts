@@ -1,3 +1,4 @@
+import { userId } from '../src/lib/profiles';
 import { loadEnvConfig } from '@next/env';
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
@@ -6,7 +7,8 @@ import { rankRecommendations } from '../src/lib/recommendations';
 
 async function main() {
   loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
-  const { values } = parseArgs({ options: { input: { type: 'string' }, 'dry-run': { type: 'boolean' }, live: { type: 'boolean' }, save: { type: 'boolean' } }, strict: true });
+  const { values } = parseArgs({ options: { user: { type: 'string' }, input: { type: 'string' }, 'dry-run': { type: 'boolean' }, live: { type: 'boolean' }, save: { type: 'boolean' } }, strict: true });
+  const profileId = userId(values.user);
   if (values['dry-run'] && values.live) throw new Error('--dry-run and --live are mutually exclusive.');
   if (values.save && (!values.live || values['dry-run'])) throw new Error('--save requires explicit --live and cannot be used with dry-run.');
   if (!values.input?.trim()) throw new Error('--input is required: provide a saved candidates:generate JSON report.');
@@ -16,7 +18,7 @@ async function main() {
   try { report = JSON.parse(raw.replace(/^\uFEFF/, '')); } catch { throw new Error('Candidate input is invalid JSON. Save with npm run --silent candidates:generate to avoid npm headers.'); }
   const database = openDatabase({ readonly: !values.save });
   try {
-    const result = await rankRecommendations(database, report, { live: values.live, save: values.save, apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL });
+    const result = await rankRecommendations(database, profileId, report, { live: values.live, save: values.save, apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL });
     console.log(JSON.stringify(result, null, 2));
     if (result.status !== 'ok' || result.save?.status === 'error') process.exitCode = 1;
   } finally { database.close(); }

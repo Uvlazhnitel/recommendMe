@@ -1,3 +1,4 @@
+import { personalScope, type UserId } from './profiles';
 import { parsePreferences, customPreferences, preferenceGuidance, type RecommendationPreferences } from './recommendation-preferences';
 import type Database from 'better-sqlite3';
 import type { MovieCandidate } from './candidates';
@@ -14,10 +15,11 @@ For each why_fit explain concrete connections between confirmed candidate featur
 For possible_mismatch give a concrete supported risk or honestly state missing information/uncertainty; do not invent flaws to fill the field. Low vote_count/popularity indicates uncertainty, not poor quality; do not prefer a popular film over a better-fitting lesser-known film. Personal ratings are not TMDB ratings.
 Only movies of at least 60 minutes in the supplied list are eligible. The server independently checks viewed/hidden status and evidence. Explain the ranked choices, not private chain-of-thought. Each why_fit is at most 1000 characters and possible_mismatch at most 600.`;
 const truncate = (value: string | null, maximum: number) => value !== null && maximum ? [...value].slice(0, maximum).join('') : null;
-export function buildRankingContext(db: Database.Database, candidates: MovieCandidate[], maxBytes: number = RANKING_LIMITS.input_bytes, preferences?: RecommendationPreferences) {
+export function buildRankingContext(db: Database.Database, userId: UserId, candidates: MovieCandidate[], maxBytes: number = RANKING_LIMITS.input_bytes, preferences?: RecommendationPreferences) {
+  personalScope(db, userId);
   const wishes = parsePreferences(preferences), guidance = preferenceGuidance(wishes);
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid ranking input byte limit.');
-  const personal = prepareTasteInputs(db);
+  const personal = prepareTasteInputs(db, userId);
   const high = personal.examples.filter(row => row.rating_100 >= 80).slice(0, 10), low = personal.examples.filter(row => row.rating_100 <= 60).slice(0, 10);
   const related = selectRelatedExamples(personal.pool, candidates, [...high, ...low], personal.taste?.context.contrast_pairs ?? []);
   const format = rankingFormat(candidates.map(row => row.tmdb_id));

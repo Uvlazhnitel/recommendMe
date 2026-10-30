@@ -19,7 +19,7 @@ test('CSV → SQLite → mocked TMDB → reinitialization/reimport preserves met
     migrateDatabase(db);
     const plan = prepareLetterboxd('Date,Name,Year,Letterboxd URI\n2020-01-01,Zero,2000,uri:zero\n2020-01-02,High,2000,uri:high\n2020-01-03,Unrated,2000,uri:unrated\n',
       'Date,Name,Year,Letterboxd URI,Rating\n2020-02-01,Zero,2000,uri:zero,0\n2020-02-02,High,2000,uri:high,5\n');
-    assert.equal((await importLetterboxd(db, plan, backup())).addedMovies, 3);
+    assert.equal((await importLetterboxd(db, 'ilya', plan, backup())).addedMovies, 3);
     const history = db.prepare('SELECT * FROM user_movies ORDER BY movie_id').all();
     const identities = db.prepare('SELECT id,title,release_year,letterboxd_uri FROM movies ORDER BY id').all();
     let requests = 0;
@@ -41,7 +41,7 @@ test('CSV → SQLite → mocked TMDB → reinitialization/reimport preserves met
     assert.deepEqual(db.prepare('SELECT id,title,release_year,letterboxd_uri FROM movies ORDER BY id').all(), identities);
     const before = db.serialize();
     migrateDatabase(db);
-    assert.equal((await importLetterboxd(db, plan, backup())).addedHistory, 0);
+    assert.equal((await importLetterboxd(db, 'ilya', plan, backup())).addedHistory, 0);
     assert.equal((await enrichTmdb(db, client, { backupPath: backup() })).processed, 0);
     assert.equal(requests, 6); assert.deepEqual(db.serialize(), before);
     assert.deepEqual(db.prepare('SELECT rating_100 FROM user_movies ORDER BY movie_id').all(),
@@ -49,7 +49,7 @@ test('CSV → SQLite → mocked TMDB → reinitialization/reimport preserves met
     const metadata = db.prepare('SELECT * FROM movies ORDER BY id').all();
     db.exec("UPDATE user_movies SET rating_100=17,rating_source='manual' WHERE movie_id=1; UPDATE user_movies SET rating_100=NULL,rating_source='none' WHERE movie_id=2");
     const editedHistory = db.prepare('SELECT * FROM user_movies ORDER BY movie_id').all();
-    await importLetterboxd(db, plan, backup());
+    await importLetterboxd(db, 'ilya', plan, backup());
     assert.deepEqual(db.prepare('SELECT * FROM user_movies ORDER BY movie_id').all(), editedHistory);
     assert.deepEqual(db.prepare('SELECT * FROM movies ORDER BY id').all(), metadata);
     assert.deepEqual(db.pragma('foreign_key_check'), []);

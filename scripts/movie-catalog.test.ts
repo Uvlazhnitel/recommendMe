@@ -1,10 +1,11 @@
+import { profileRequest } from './fixtures/profile-request';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { SCHEMA_VERSION } from '../src/lib/migrations';
+import { migrateDatabase, SCHEMA_VERSION } from '../src/lib/migrations';
 import { addCatalogMovie } from '../src/lib/movie-catalog';
 import { movieHandlers } from '../src/lib/movie-http';
 import { createTmdbClient, parseDetails, TmdbError } from '../src/lib/tmdb';
@@ -18,7 +19,8 @@ function fixture(version = 4) {
   db.pragma('foreign_keys=ON');
   for (const file of ['001_initial.sql', '002_letterboxd_rating_date.sql', '003_tmdb_metadata.sql', '004_recommendation_memory.sql'].slice(0, version)) db.exec(readFileSync(`migrations/${file}`, 'utf8'));
   db.pragma(`user_version=${version}`);
-  db.exec("INSERT INTO movies (title,release_year,letterboxd_uri) VALUES ('Legacy',2000,'https://example.test/legacy'); INSERT INTO user_movies (movie_id,watched,rating_100,original_rating_stars,rating_source,not_interested) VALUES (1,1,0,0,'letterboxd',1); INSERT INTO recommendations (movie_id) VALUES (1); INSERT INTO taste_profile (profile_json) VALUES ('{}')");
+  migrateDatabase(db);
+  db.exec("INSERT INTO movies (title,release_year,letterboxd_uri) VALUES ('Legacy',2000,'https://example.test/legacy'); INSERT INTO user_movies (user_id,movie_id,watched,rating_100,original_rating_stars,rating_source,not_interested) VALUES ('ilya',1,1,0,0,'letterboxd',1); INSERT INTO recommendations (user_id,movie_id) VALUES ('ilya',1); INSERT INTO taste_profile (user_id,profile_json) VALUES ('ilya','{}')");
   return { db, folder, path, close: () => { if (db.open) db.close(); rmSync(folder, { recursive: true, force: true }); } };
 }
 function snapshot(db: Database.Database) {
@@ -30,7 +32,7 @@ function mocked(handler: (url: URL) => unknown) {
     now: () => clock, sleep: async ms => { clock += ms; } });
   return { api, urls };
 }
-const post = (value: unknown) => new Request('http://localhost/api/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+const post = (value: unknown) => profileRequest('http://localhost/api/movies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
 
 test('interactive search preserves same-name years, optional year, poster, page limit and strict search', async () => {
   const { api, urls } = mocked(() => ({ total_pages: 2, results: [raw(), raw(11, 'Dune', '1984-12-14'), raw()] }));
@@ -42,7 +44,7 @@ test('interactive search preserves same-name years, optional year, poster, page 
   assert.ok(urls.every(url => url.pathname === '/3/search/movie'));
 });
 
-test('catalog migrates 3→4 after backup; stores verified details and leaves personal data unchanged', async () => {
+test('catalog writes after explicit schema8 preparation and backup; stores verified details and leaves personal data unchanged', async () => {
   const f = fixture(3);
   try {
     const before = snapshot(f.db); const { api, urls } = mocked(() => rich());
@@ -54,7 +56,7 @@ test('catalog migrates 3→4 after backup; stores verified details and leaves pe
     assert.equal(row.letterboxd_uri, null); assert.equal(row.tmdb_enrichment_status, 'matched'); assert.equal(row.original_language, 'en');
     assert.equal(JSON.parse(String(row.directors_json))[0].id, 3); assert.equal(JSON.parse(String(row.credits_json)).cast[0].id, 2);
     const backup = new Database(join(f.folder, 'backups', readdirSync(join(f.folder, 'backups'))[0]), { readonly: true });
-    assert.equal(backup.pragma('user_version', { simple: true }), 3); assert.equal(snapshot(backup), before); backup.close();
+    assert.equal(backup.pragma('user_version', { simple: true }), SCHEMA_VERSION); assert.equal(snapshot(backup), before); backup.close();
     const all = JSON.stringify(f.db.prepare('SELECT * FROM movies').all());
     assert.equal((await addCatalogMovie(f.db, { details: async () => { throw Error('Unexpected network'); } }, 10)).status, 'already_exists');
     assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM movies').all()), all);
@@ -78,7 +80,7 @@ test('potential legacy matches, including original title and unknown year, never
       f.db.prepare('UPDATE movies SET original_title=?,release_year=? WHERE id=1').run(' DUNE! ', year);
       const before = JSON.stringify(f.db.prepare('SELECT * FROM movies').all());
       let result = await addCatalogMovie(f.db, { details: async () => parseDetails(rich()) }, 10);
-      assert.equal(result.status, 'possible_duplicate'); assert.equal(f.db.pragma('user_version', { simple: true }), 3);
+      assert.equal(result.status, 'possible_duplicate'); assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
       assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM movies').all()), before);
       f.db.prepare('INSERT INTO movies(title,release_year) VALUES (?,?)').run('Dune', 2021);
       result = await addCatalogMovie(f.db, { details: async () => parseDetails(rich()) }, 10);
@@ -109,7 +111,7 @@ test('invalid ID, TMDB failure and invalid details never write; backup failure p
     assert.equal(calls, 0); await assert.rejects(addCatalogMovie(f.db, api, 10));
     await assert.rejects(addCatalogMovie(f.db, { details: async () => parseDetails({ ...rich(), media_type: 'tv' }) }, 10));
     await assert.rejects(addCatalogMovie(f.db, { details: async () => parseDetails(rich()) }, 10, { backup: async () => { throw Error('Backup failure'); } }));
-    assert.equal(f.db.pragma('user_version', { simple: true }), 3); assert.equal(snapshot(f.db), before);
+    assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION); assert.equal(snapshot(f.db), before);
     assert.equal((f.db.prepare('SELECT count(*) n FROM movies').get() as { n: number }).n, 1);
   } finally { f.close(); }
 });
@@ -142,16 +144,16 @@ test('state added while HTTP is pending is checked before write', async () => {
   } finally { f.close(); }
 });
 
-test('HTTP search validates input without SQLite and POST validates before opening it', async () => {
+test('HTTP validation precedes SQLite; valid search checks explicit schema before API', async () => {
   let opens = 0; const { api } = mocked(() => ({ total_pages: 1, results: [raw()] }));
   const handlers = movieHandlers({ api: () => api, open: () => { opens++; throw Error('Forbidden'); } });
-  for (const suffix of ['?q=', `?q=${'a'.repeat(201)}`, '?q=Dune&year=0', '?q=Dune&year=2.5', '?q=Dune&year=10000']) assert.equal((await handlers.search(new Request('http://localhost/' + suffix))).status, 400);
-  const response = await handlers.search(new Request('http://localhost/?q=Dune&year=2021'));
-  assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
+  for (const suffix of ['?q=', `?q=${'a'.repeat(201)}`, '?q=Dune&year=0', '?q=Dune&year=2.5', '?q=Dune&year=10000']) assert.equal((await handlers.search(profileRequest('http://localhost/' + suffix))).status, 400);
+  const response = await handlers.search(profileRequest('http://localhost/?q=Dune&year=2021'));
+  assert.equal(response.status, 503); assert.equal(response.headers.get('cache-control'), 'no-store');
   for (const body of [{}, { tmdb_id: '10' }, { tmdb_id: 1.2 }, { tmdb_id: 0 }, { tmdb_id: 10, watched: 1 }]) assert.equal((await handlers.add(post(body))).status, 400);
-  assert.equal((await handlers.add(new Request('http://localhost/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' }))).status, 400);
+  assert.equal((await handlers.add(profileRequest('http://localhost/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' }))).status, 400);
   assert.equal((await handlers.add(post({ tmdb_id: 10, payload: 'a'.repeat(2000) }))).status, 400);
-  assert.equal(opens, 0);
+  assert.equal(opens, 1);
 });
 
 test('HTTP add returns created, already_exists, possible_duplicate and sanitized errors', async () => {

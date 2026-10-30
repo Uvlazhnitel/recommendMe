@@ -1,5 +1,5 @@
+import { requireProfileSchema } from './profiles';
 import type Database from 'better-sqlite3';
-import { migrateDatabase } from './migrations';
 import { matches, TmdbError, type Candidate, type Details, type TmdbClient } from './tmdb';
 
 type Status = 'matched' | 'not_found' | 'ambiguous' | 'error';
@@ -15,11 +15,11 @@ const json = (value: unknown) => value === null ? null : JSON.stringify(value);
 export async function enrichTmdb(database: Database.Database, client: TmdbClient, options: Options = {}): Promise<EnrichmentReport> {
   if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit <= 0)) throw new Error('limit must be a positive integer.');
   const version = database.pragma('user_version', { simple: true }) as number;
-  if (version < 2 || version > 7) throw new Error('TMDB enrichment requires schema version 2, 3, 4, 5, 6 or 7.');
+  requireProfileSchema(database);
   if (!options.dryRun) {
     if (!options.backupPath) throw new Error('A backup path is required before enrichment.');
     await database.backup(options.backupPath);
-    migrateDatabase(database);
+    requireProfileSchema(database);
   }
   // SELECT * also permits a read-only dry-run against schema 2, before migration.
   const allMovies = database.prepare('SELECT * FROM movies ORDER BY id').all() as Movie[];

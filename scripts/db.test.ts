@@ -24,7 +24,7 @@ test('read-only health probe neither creates a missing file nor changes an exist
     assert.notEqual(run(probe, missing).status, 0);
     assert.equal(existsSync(join(directory, 'absent')), false);
     const path = join(directory, 'test.sqlite');
-    assert.equal(run(`${databaseImport} const db = openDatabase(); db.pragma('user_version=3'); db.close();`, path).status, 0);
+    assert.equal(run(`${databaseImport} const db = openDatabase({create:true}); db.pragma('user_version=3'); db.close();`, path).status, 0);
     const before = readFileSync(path);
     assert.equal(run(probe, path).status, 0);
     assert.deepEqual(readFileSync(path), before);
@@ -36,14 +36,14 @@ test('SQLite preserves data across independent processes; connection creates no 
   try {
     const path = join(directory, 'nested', 'test.sqlite');
     const writer = run(`${databaseImport}
-      const db = openDatabase();
+      const db = openDatabase({create:true});
       if (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().length) throw Error('Unexpected tables');
       db.exec('CREATE TABLE probe (value TEXT NOT NULL)');
       db.prepare('INSERT INTO probe VALUES (?)').run('сохранено');
       db.close();`, path);
     assert.equal(writer.status, 0, writer.stderr);
     const reader = run(`${databaseImport}
-      const db = openDatabase();
+      const db = openDatabase({create:true});
       console.log(db.prepare('SELECT value FROM probe').get().value);
       db.close();`, path);
     assert.equal(reader.status, 0, reader.stderr);
@@ -74,7 +74,7 @@ test('relative database paths resolve from the project root', () => {
   try {
     const path = relative(process.cwd(), join(directory, 'test.sqlite'));
     const result = run(`${databaseImport}
-      const db = openDatabase(); console.log(db.name); db.close();`, path);
+      const db = openDatabase({create:true}); console.log(db.name); db.close();`, path);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), resolve(path));
   } finally {

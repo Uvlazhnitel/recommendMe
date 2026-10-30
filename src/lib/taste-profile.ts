@@ -1,3 +1,4 @@
+import { personalScope, type UserId } from './profiles';
 import { readReviewTexts, reviewSnapshot, type ReviewSnapshot } from './review-context';
 import { openSync, closeSync, writeFileSync, unlinkSync, fstatSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -12,8 +13,9 @@ export type StoredProfile = ProfileBody & { profile_version: number; generated_a
 const bodyFields = ['strong_preferences', 'negative_patterns', 'contrasts', 'uncertainties'] as const;
 const metadataFields = ['profile_version', 'generated_at', 'ratings_count', 'ratings_snapshot', 'context_fingerprint', 'prompt_version', 'schema_version',
   'contrast_pairs_count', 'requested_model', 'model', 'response_id', 'usage'];
-function rawProfile(database: Database.Database): string | null {
-  return (database.prepare('SELECT profile_json FROM taste_profile WHERE id=1').get() as { profile_json: string } | undefined)?.profile_json ?? null;
+function rawProfile(database: Database.Database, userId: UserId): string | null {
+  personalScope(database, userId);
+  return (database.prepare('SELECT profile_json FROM taste_profile WHERE user_id=@userId').get({userId}) as { profile_json: string } | undefined)?.profile_json ?? null;
 }
 function positiveInteger(value: unknown) { return typeof value === 'number' && Number.isSafeInteger(value) && value > 0; }
 export function parseStoredProfile(raw: string): StoredProfile {
@@ -38,10 +40,12 @@ export function parseStoredProfile(raw: string): StoredProfile {
   parseUsage(record.usage);
   return value as StoredProfile;
 }
-export function readTasteProfile(database: Database.Database): StoredProfile | null {
-  const raw = rawProfile(database); return raw === null ? null : parseStoredProfile(raw);
+export function readTasteProfile(database: Database.Database, userId: UserId): StoredProfile | null {
+  personalScope(database, userId);
+  const raw = rawProfile(database, userId); return raw === null ? null : parseStoredProfile(raw);
 }
-export function acquireTasteLock(database: Database.Database) {
+export function acquireTasteLock(database: Database.Database, userId: UserId) {
+  personalScope(database, userId);
   const path = `${resolve(database.name)}.taste.lock`;
   let fd: number;
   try { fd = openSync(path, 'wx', 0o600); }
@@ -49,7 +53,7 @@ export function acquireTasteLock(database: Database.Database) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`Taste generation is locked: ${path}. Check the owner PID in that file; only remove a stale lock after verifying the process has exited.`);
     throw new Error('Cannot create the taste generation lock.');
   }
-  try { writeFileSync(fd, JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })); }
+  try { writeFileSync(fd, JSON.stringify({ user_id: userId, pid: process.pid, created_at: new Date().toISOString() })); }
   catch { closeSync(fd); unlinkSync(path); throw new Error('Cannot write taste generation lock.'); }
   const owned = fstatSync(fd);
   return () => {
@@ -61,38 +65,40 @@ export function acquireTasteLock(database: Database.Database) {
 function cacheStatus(saved: StoredProfile | null, context: TasteContext) {
   return saved === null ? 'missing' : saved.context_fingerprint === context.fingerprint && saved.prompt_version === PROMPT_VERSION ? 'current' : 'stale';
 }
-function savedOrNull(database: Database.Database, force: boolean) {
-  try { return readTasteProfile(database); }
+function savedOrNull(database: Database.Database, userId: UserId, force: boolean) {
+  personalScope(database, userId);
+  try { return readTasteProfile(database, userId); }
   catch (error) { if (!force) throw error; return null; }
 }
 type Options = { live?: boolean; force?: boolean; apiKey?: string; model?: string; backupPath?: string; fetch?: typeof fetch; timeoutMs?: number };
-export async function generateTasteProfile(database: Database.Database, options: Options = {}) {
+export async function generateTasteProfile(database: Database.Database, userId: UserId, options: Options = {}) {
+  personalScope(database, userId);
   if (options.force && !options.live) throw new Error('--force requires --live.');
-  let saved = savedOrNull(database, Boolean(options.force));
-  const ratedCount = (database.prepare('SELECT count(*) n FROM user_movies WHERE rating_100 IS NOT NULL').get() as { n: number }).n;
+  let saved = savedOrNull(database, userId, Boolean(options.force));
+  const ratedCount = (database.prepare('SELECT count(*) n FROM user_movies WHERE user_id=@userId AND rating_100 IS NOT NULL').get({userId}) as { n: number }).n;
   if (ratedCount === 0 && saved && !options.force) {
     return { mode: options.live ? 'cached' : 'dry-run', cache: 'stale', profile_version: saved.profile_version,
       ratings_count: options.live ? saved.ratings_count : 0, notice: 'No currently rated works. Previous profile retained; no API call made.' };
   }
-  let context = buildTasteContext(database);
+  let context = buildTasteContext(database, userId);
   if (!options.live) return { mode: 'dry-run', ...context.summary, cache: cacheStatus(saved, context) };
   if (saved && !options.force) return { mode: 'cached', cache: cacheStatus(saved, context), profile_version: saved.profile_version,
     ratings_count: saved.ratings_count, notice: 'No API call made. Regeneration requires --live --force.' };
   requireOpenAIConfig(options.apiKey, options.model);
   if (!options.backupPath) throw new Error('A SQLite backup path is required for live generation.');
-  const release = acquireTasteLock(database);
+  const release = acquireTasteLock(database, userId);
   try {
     // A different process may have completed while we were preparing the first snapshot.
-    context = buildTasteContext(database); saved = savedOrNull(database, Boolean(options.force));
+    context = buildTasteContext(database, userId); saved = savedOrNull(database, userId, Boolean(options.force));
     if (saved && !options.force) return { mode: 'cached', cache: cacheStatus(saved, context), profile_version: saved.profile_version,
       ratings_count: saved.ratings_count, notice: 'No API call made. Regeneration requires --live --force.' };
-    const priorRaw = rawProfile(database);
+    const priorRaw = rawProfile(database, userId);
     await database.backup(options.backupPath);
     const result = await requestTasteProfile(context, options);
     const body = validateProfile(result.body, context.snapshot, context.context.contrast_pairs.length > 0);
     const profile = database.transaction(() => {
-      if (buildTasteContext(database).fingerprint !== context.fingerprint || JSON.stringify(reviewSnapshot(readReviewTexts(database))) !== JSON.stringify(context.reviewsSnapshot)) throw new Error('Ratings, reviews or analysis context changed during generation. Previous profile retained; no automatic retry.');
-      if (rawProfile(database) !== priorRaw) throw new Error('Saved profile changed during generation. Previous profile retained.');
+      if (buildTasteContext(database, userId).fingerprint !== context.fingerprint || JSON.stringify(reviewSnapshot(readReviewTexts(database, userId))) !== JSON.stringify(context.reviewsSnapshot)) throw new Error('Ratings, reviews or analysis context changed during generation. Previous profile retained; no automatic retry.');
+      if (rawProfile(database, userId) !== priorRaw) throw new Error('Saved profile changed during generation. Previous profile retained.');
       let version = saved?.profile_version ?? 0;
       if (!saved && priorRaw) {
         try { const previous = JSON.parse(priorRaw) as Record<string, unknown>; if (previous && positiveInteger(previous.profile_version)) version = previous.profile_version as number; }
@@ -103,21 +109,22 @@ export async function generateTasteProfile(database: Database.Database, options:
         ratings_snapshot: context.snapshot, reviews_snapshot: context.reviewsSnapshot, context_fingerprint: context.fingerprint, prompt_version: PROMPT_VERSION, schema_version: PROFILE_SCHEMA_VERSION,
         contrast_pairs_count: context.context.contrast_pairs.length, requested_model: options.model!.trim(), model: result.model,
         response_id: result.response_id, usage: result.usage };
-      database.prepare('INSERT INTO taste_profile (id,profile_json) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET profile_json=excluded.profile_json').run(JSON.stringify(profile));
+      database.prepare('INSERT INTO taste_profile (user_id,profile_json) VALUES (@userId,?) ON CONFLICT(user_id) DO UPDATE SET profile_json=excluded.profile_json').run({userId}, JSON.stringify(profile));
       return profile;
     }).immediate();
     return { mode: 'generated', profile_version: profile.profile_version, ratings_count: profile.ratings_count, model: profile.model, usage: profile.usage };
   } finally { release(); }
 }
-export function displayTasteProfile(database: Database.Database) {
-  const saved = readTasteProfile(database);
+export function displayTasteProfile(database: Database.Database, userId: UserId) {
+  personalScope(database, userId);
+  const saved = readTasteProfile(database, userId);
   if (!saved) return 'No saved taste profile. Generate one explicitly with taste:generate -- --live.';
-  const current = database.prepare('SELECT m.id,m.title,m.release_year,u.rating_100 FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id').all() as
+  const current = database.prepare('SELECT m.id,m.title,m.release_year,u.rating_100 FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId').all({userId}) as
     { id: number; title: string; release_year: number | null; rating_100: number | null }[];
   const byId = new Map(current.map(row => [row.id, row]));
   const snapshot = current.filter(row => row.rating_100 !== null).map(row => ({ movie_id: row.id, rating_100: row.rating_100! })).sort((a, b) => a.movie_id - b.movie_id);
   let cache = 'stale';
-  if (snapshot.length) cache = cacheStatus(saved, buildTasteContext(database));
+  if (snapshot.length) cache = cacheStatus(saved, buildTasteContext(database, userId));
   const lines = [`Taste profile v${saved.profile_version} (${cache}), ${saved.generated_at}`, `Model: ${saved.model}; rated works at generation: ${saved.ratings_count}`];
   const ref = (evidence: Evidence) => {
     const movie = byId.get(evidence.movie_id);

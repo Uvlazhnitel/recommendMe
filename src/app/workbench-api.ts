@@ -1,3 +1,4 @@
+import { profileFetch } from './profile-requests';
 export type Match = { movie_id: number; title: string; year: number | null };
 const errors: Record<string, string> = {
   invalid_search: 'Введите название (до 200 символов) и корректный год.', tmdb_unavailable: 'TMDB недоступен. Повторите поиск позже.',
@@ -19,7 +20,7 @@ export class ApiError extends Error {
 }
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
-  try { response = await fetch(path, { cache: 'no-store', ...init }); }
+  try { response = await profileFetch(path, { cache: 'no-store', ...init }); }
   catch { throw new Error('Нет связи с приложением. Попробуйте ещё раз.'); }
   let body;
   try { body = await response.json(); } catch { throw new Error('Приложение вернуло некорректный ответ.'); }

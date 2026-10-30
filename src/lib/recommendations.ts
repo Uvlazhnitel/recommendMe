@@ -1,3 +1,5 @@
+import { assertReportOwner } from './profiles';
+import { personalScope, type UserId } from './profiles';
 import { parsePreferences, preferenceExclusion, samePreferences, type RecommendationPreferences } from './recommendation-preferences';
 import { stageEvaluation, type StageEvaluation } from './evaluation-metadata';
 import type Database from 'better-sqlite3';
@@ -18,19 +20,21 @@ function exclusion(movie: MovieCandidate, history: ReturnType<typeof readCandida
   if (!Number.isSafeInteger(movie.runtime) || movie.runtime < 60) return 'invalid_runtime';
   return blockedReason({ id: movie.tmdb_id, title: movie.title, original_title: movie.original_title, year: movie.year }, history);
 }
-export async function rankRecommendations(db: Database.Database, candidateReport: unknown, options: OpenAIOptions & { live?: boolean; save?: boolean; backupPath?: string; preferences?: RecommendationPreferences } = {}) {
+export async function rankRecommendations(db: Database.Database, userId: UserId, candidateReport: unknown, options: OpenAIOptions & { live?: boolean; save?: boolean; backupPath?: string; preferences?: RecommendationPreferences } = {}) {
+  personalScope(db, userId);
+  assertReportOwner(candidateReport,userId);
   if (options.save && !options.live) throw new Error('--save requires explicit --live and cannot be used with dry-run.');
   const candidatePreferences = candidateReport && typeof candidateReport === 'object' && 'preferences' in candidateReport ? parsePreferences(candidateReport.preferences) : undefined;
   const preferences = options.preferences === undefined ? candidatePreferences : parsePreferences(options.preferences);
   if (candidatePreferences && preferences && !samePreferences(candidatePreferences, preferences)) throw new Error('Preference snapshots disagree.');
   const parsed = parseCandidateReport(candidateReport), diagnostics: RankingDiagnostic[] = [...parsed.diagnostics];
-  const history = readCandidateHistory(db);
+  const history = readCandidateHistory(db, userId);
   const candidates = parsed.candidates.filter(movie => {
     const reason = exclusion(movie, history) || preferenceExclusion(movie, parsePreferences(preferences));
     if (reason) diagnostics.push({ stage: 'input', tmdb_id: movie.tmdb_id, reason });
     return !reason;
   });
-  const result = { ...(preferences ? { preferences } : {}), evaluation: null as StageEvaluation | null, mode: options.live ? 'live' : 'dry-run', status: 'ok' as 'ok' | 'error', recommendations: [] as RankedRecommendation[], diagnostics,
+  const result = { user_id: userId, ...(preferences ? { preferences } : {}), evaluation: null as StageEvaluation | null, mode: options.live ? 'live' : 'dry-run', status: 'ok' as 'ok' | 'error', recommendations: [] as RankedRecommendation[], diagnostics,
     errors: [] as string[], warnings: [...parsed.warnings], context: null as ReturnType<typeof buildRankingContext>['summary'] | null,
     input_count: parsed.input_count, eligible_count: candidates.length, result_id: null as string | null, generated_at: null as string | null, save: null as SaveReport | null,
     readiness: { openai_key: Boolean(options.apiKey?.trim()), openai_model: Boolean(options.model?.trim()) },
@@ -38,7 +42,7 @@ export async function rankRecommendations(db: Database.Database, candidateReport
   const recent = diagnostics.filter(row => row.reason === 'recently_recommended').length;
   if (recent) result.warnings.push(`${recent} recently recommended candidates excluded for ${RECOMMENDATION_REPEAT_DAYS} days. A smaller result is allowed; the cooldown is not relaxed.`);
   if (!candidates.length) { result.status = 'error'; result.errors.push('No eligible candidates remain; no API call made.'); return result; }
-  const context = buildRankingContext(db, candidates, undefined, preferences);
+  const context = buildRankingContext(db, userId, candidates, undefined, preferences);
   result.context = context.summary; result.warnings.push(...context.warnings);
   if (context.summary.profile_refresh.refresh_recommended) result.warnings.push(`${context.summary.profile_refresh.notice} ${context.summary.profile_refresh.refresh_command}`);
   if (!options.live) return result;
@@ -53,7 +57,7 @@ export async function rankRecommendations(db: Database.Database, candidateReport
     const checked = validateRanking(output.body, candidates, context.snapshot);
     diagnostics.push(...checked.diagnostics);
     // One new SQL snapshot supplies both exclusions and current evidence at return time.
-    const current = readCandidateHistory(db), currentById = new Map(current.map(row => [row.id, row]));
+    const current = readCandidateHistory(db, userId), currentById = new Map(current.map(row => [row.id, row]));
     const allowed = new Map(candidates.map(row => [row.tmdb_id, row]));
     for (const recommendation of checked.recommendations) {
       const movie = allowed.get(recommendation.tmdb_id)!;
@@ -72,7 +76,7 @@ export async function rankRecommendations(db: Database.Database, candidateReport
     result.result_id = randomUUID(); result.generated_at = new Date().toISOString();
     if (options.save) {
       try {
-        result.save = recordRecommendations(db, candidateReport, { result }, { dryRun: false });
+        result.save = recordRecommendations(db, userId, candidateReport, { result }, { dryRun: false });
         result.recommendations = result.recommendations.filter(row => !result.save!.skipped.some(skip => skip.tmdb_id === row.tmdb_id));
         if (!result.recommendations.length) { result.status = 'error'; result.errors.push('All recommendations became ineligible before saving; no new AI request was made.'); }
       } catch (error) {

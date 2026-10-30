@@ -1,5 +1,6 @@
+import { requireProfileSchema } from './profiles';
+import { personalScope, type UserId } from './profiles';
 import type Database from 'better-sqlite3';
-import { migrateDatabase } from './migrations';
 
 type Source = 'watched' | 'ratings';
 type Issue = { source: Source; record: number; reason: string };
@@ -128,18 +129,20 @@ export function prepareLetterboxd(watchedCsv: string, ratingsCsv: string): Impor
   return { groups: valid, rowsRead: { watched: watched.count, ratings: ratings.count }, duplicates, issues };
 }
 
-function counts(database: Database.Database, ids?: number[]): Counts {
-  const rows = ids ? ids.map(id => database.prepare('SELECT watched, rating_100 FROM user_movies WHERE movie_id = ?').get(id)) :
-    database.prepare('SELECT watched, rating_100 FROM user_movies').all();
+function counts(database: Database.Database, userId: UserId, ids?: number[]): Counts {
+  personalScope(database, userId);
+  const rows = ids ? ids.map(id => database.prepare('SELECT watched, rating_100 FROM user_movies WHERE user_id=@userId AND movie_id = ?').get({userId}, id)) :
+    database.prepare('SELECT watched, rating_100 FROM user_movies WHERE user_id=@userId').all({userId});
   const history = rows as { watched: number; rating_100: number | null }[];
   const viewed = history.filter(row => row.watched === 1);
   return { watched: viewed.length, rated: viewed.filter(row => row.rating_100 !== null).length, unrated: viewed.filter(row => row.rating_100 === null).length };
 }
 
 // Preflight uses no writes. Backup must succeed before schema or import changes.
-export async function importLetterboxd(database: Database.Database, plan: ImportPlan, backupPath: string) {
+export async function importLetterboxd(database: Database.Database, userId: UserId, plan: ImportPlan, backupPath: string) {
+  personalScope(database, userId);
   await database.backup(backupPath);
-  migrateDatabase(database);
+  requireProfileSchema(database);
   return database.transaction(() => {
     const issues = [...plan.issues];
     const movies = database.prepare('SELECT id, title, release_year, letterboxd_uri FROM movies').all() as Movie[];
@@ -170,17 +173,17 @@ export async function importLetterboxd(database: Database.Database, plan: Import
       const watched = group.rows.find(row => row.source === 'watched');
       const rated = group.rows.find(row => row.source === 'ratings');
       if (rated && !watched) ratingsOutsideWatched++;
-      if (database.prepare('SELECT 1 FROM user_movies WHERE movie_id = ?').get(movie.id)) { preservedHistory++; continue; }
+      if (database.prepare('SELECT 1 FROM user_movies WHERE user_id=@userId AND movie_id = ?').get({userId}, movie.id)) { preservedHistory++; continue; }
       const stars = rated?.stars ?? null;
       database.prepare(`INSERT INTO user_movies
-        (movie_id, watched, rating_100, original_rating_stars, rating_source, letterboxd_date, letterboxd_rating_date)
-        VALUES (?, 1, ?, ?, ?, ?, ?)`).run(movie.id, stars === null ? null : stars * 20, stars,
+        (user_id,movie_id, watched, rating_100, original_rating_stars, rating_source, letterboxd_date, letterboxd_rating_date)
+        VALUES (@userId,?, 1, ?, ?, ?, ?, ?)`).run({userId}, movie.id, stars === null ? null : stars * 20, stars,
         stars === null ? 'none' : 'letterboxd', watched?.date ?? null, rated?.date ?? null);
       addedHistory++;
     }
     const skippedRows = new Set(issues.map(issue => `${issue.source}:${issue.record}`)).size;
     return { status: skippedRows ? 'partial' : 'complete', rowsRead: plan.rowsRead, uniqueWorks: plan.groups.length,
       addedMovies, addedHistory, preservedHistory, attachedUris, duplicates: plan.duplicates,
-      skippedRows, issues, ratingsOutsideWatched, importedHistory: counts(database, [...new Set(ids)]), library: counts(database), backupPath };
+      skippedRows, issues, ratingsOutsideWatched, importedHistory: counts(database, userId, [...new Set(ids)]), library: counts(database, userId), backupPath };
   }).immediate();
 }

@@ -1,3 +1,4 @@
+import { userId } from '../src/lib/profiles';
 import { loadEnvConfig } from '@next/env';
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
@@ -12,8 +13,9 @@ function readJSON(path: string) {
 }
 async function main() {
   loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
-  const { values } = parseArgs({ options: { input: { type: 'string' }, 'tmdb-ids': { type: 'string' }, result: { type: 'string' },
+  const { values } = parseArgs({ options: { user: { type: 'string' }, input: { type: 'string' }, 'tmdb-ids': { type: 'string' }, result: { type: 'string' },
     save: { type: 'boolean' }, 'dry-run': { type: 'boolean' } }, strict: true });
+  const profileId = userId(values.user);
   if (values.save && values['dry-run']) throw new Error('--save and --dry-run are mutually exclusive.');
   if (!values.input?.trim()) throw new Error('--input is required.');
   if (Boolean(values['tmdb-ids']) === Boolean(values.result)) throw new Error('Provide exactly one of --tmdb-ids or --result.');
@@ -27,10 +29,10 @@ async function main() {
   const db = openDatabase({ readonly: !values.save });
   try {
     // Validate the complete operation before creating a backup or applying migrations.
-    const preview = recordRecommendations(db, candidateReport, request);
+    const preview = recordRecommendations(db, profileId, candidateReport, request);
     if (!values.save || preview.status === 'already_saved') { console.log(JSON.stringify(preview, null, 2)); return; }
     await backupForRecommendationWrite(db);
-    console.log(JSON.stringify(recordRecommendations(db, candidateReport, request, { dryRun: false }), null, 2));
+    console.log(JSON.stringify(recordRecommendations(db, profileId, candidateReport, request, { dryRun: false }), null, 2));
   } finally { db.close(); }
 }
 main().catch(error => { console.error(error instanceof Error ? error.message : 'Recording recommendations failed.'); process.exitCode = 1; });

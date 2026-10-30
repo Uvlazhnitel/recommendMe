@@ -13,7 +13,7 @@ const f = fixture();
 try {
   const resultId = '5a100000-0000-4000-8000-000000000001';
   const requestId = '5a100000-0000-4000-8000-000000000002';
-  recordRecommendations(f.db, report(), { result: { mode: 'live', status: 'ok', result_id: resultId,
+  recordRecommendations(f.db, 'ilya', report(), { result: { mode: 'live', status: 'ok', result_id: resultId,
     generated_at: new Date().toISOString(), recommendations: [choice(201), choice(202)] } }, { dryRun: false });
   f.db.exec(`UPDATE movies SET poster_path=NULL, backdrop_path=NULL;
     INSERT INTO movies(id,title,release_year,media_type) VALUES(20,'Synthetic New Watch',2020,'movie');

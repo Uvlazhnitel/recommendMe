@@ -1,3 +1,7 @@
+import { readCandidateHistory } from './candidate-context';
+import { userId as validUserId } from './profiles';
+import { requireProfileSchema } from './profiles';
+import { personalScope, type UserId } from './profiles';
 import { readHomeSummary } from './home-summary';
 import { parsePreferences, samePreferences, reportPreferences, type RecommendationPreferences } from './recommendation-preferences';
 // Node-only orchestration. Existing candidate/ranking functions own every AI rule.
@@ -8,7 +12,6 @@ import { buildCandidateContext, prepareTasteInputs } from './candidate-context';
 import { generateCandidates } from './candidates';
 import { rankRecommendations } from './recommendations';
 import { backupForRecommendationWrite, recordRecommendations } from './recommendation-memory';
-import { migrateDatabase } from './migrations';
 import { recommendationSchema, readRecommendationBatch } from './recommendation-batches';
 import { GenerationError, runStore, type StoredRun } from './recommendation-runs';
 
@@ -20,28 +23,33 @@ export type RecommendationDependencies = {
   fetch?: typeof fetch; sleep?: (ms: number) => Promise<unknown>; timeoutMs?: number;
 };
 const configuration = () => ({ apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL, tmdbKey: process.env.TMDB_API_KEY });
-function readiness(db: Database.Database, config: { apiKey?: string; model?: string; tmdbKey?: string }) {
+function readiness(db: Database.Database, userId: UserId, config: { apiKey?: string; model?: string; tmdbKey?: string }) {
+  personalScope(db, userId);
   const settings = Boolean(config.apiKey?.trim() && config.model?.trim() && config.tmdbKey?.trim());
   try {
-    const personal = prepareTasteInputs(db);
+    if (!readCandidateHistory(db,userId).some(row=>row.rating_100!==null)) return { can_generate:false,reason:'ratings_missing',profile_refresh:null };
+    const personal = prepareTasteInputs(db, userId);
     return { can_generate: settings && personal.rated.length > 0, reason: !settings ? 'configuration_missing' : !personal.rated.length ? 'ratings_missing' : null,
       profile_refresh: { status: personal.profileRefresh.status, total_changes: personal.profileRefresh.total_changes, review_changes: personal.profileRefresh.review_changes, total_feedback_changes: personal.profileRefresh.total_feedback_changes, threshold: personal.profileRefresh.threshold } };
   } catch {
     return { can_generate: false, reason: 'profile_unavailable', profile_refresh: null };
   }
 }
-function hasResult(db: Database.Database, id: string | undefined | null) {
-  return Boolean(id && recommendationSchema(db) >= 4 && db.prepare('SELECT 1 FROM recommendations WHERE result_id=? LIMIT 1').get(id));
+function hasResult(db: Database.Database, userId: UserId, id: string | undefined | null) {
+  personalScope(db, userId);
+  return Boolean(id && recommendationSchema(db) >= 4 && db.prepare('SELECT 1 FROM recommendations WHERE user_id=@userId AND result_id=? LIMIT 1').get({userId}, id));
 }
-function publicGeneration(db: Database.Database) {
+function publicGeneration(db: Database.Database, userId: UserId) {
+  personalScope(db, userId);
   try {
-    const store = runStore(db.name), latest = store.latest();
+    const store = runStore(db.name, userId), latest = store.latest();
     if (store.locked()) {
+      if (store.lockOwner() !== userId) return { state: 'busy_other' as const, stage: null, request_id: null, recoverable_save: false };
       const id = store.activeRequestId();
       return { state: store.ownerAlive() ? 'running' as const : 'interrupted' as const, stage: latest && id === latest.request_id ? latest.stage : 'starting', request_id: id, recoverable_save: false };
     }
     if (!latest) return { state: 'idle' as const, stage: null, request_id: null, recoverable_save: false };
-    if (hasResult(db, latest.result_id ?? latest.ranking?.result_id)) return { state: 'saved' as const, stage: 'saved', request_id: latest.request_id, recoverable_save: false };
+    if (hasResult(db, userId, latest.result_id ?? latest.ranking?.result_id)) return { state: 'saved' as const, stage: 'saved', request_id: latest.request_id, recoverable_save: false };
     const recovery = ['saving', 'save_failed'].includes(latest.stage) && Boolean(latest.ranking && latest.candidates);
     return { state: recovery ? 'save_failed' as const : latest.stage === 'failed' ? 'failed' as const : 'interrupted' as const,
       stage: latest.stage, request_id: latest.request_id, recoverable_save: recovery };
@@ -50,15 +58,17 @@ function publicGeneration(db: Database.Database) {
     return { state: 'interrupted' as const, stage: null, request_id: null, recoverable_save: false };
   }
 }
-export function recommendationState(dependencies: RecommendationDependencies = {}) {
+export function recommendationState(userId: UserId, dependencies: RecommendationDependencies = {}) {
+  validUserId(userId);
   const db = (dependencies.open ?? openDatabase)({ readonly: true });
   try {
     recommendationSchema(db);
-    return db.transaction(() => ({ status: 'ok' as const, batch: readRecommendationBatch(db), home: readHomeSummary(db), readiness: readiness(db, (dependencies.config ?? configuration)()), generation: publicGeneration(db) })).deferred();
+    return db.transaction(() => ({ status: 'ok' as const, batch: readRecommendationBatch(db, userId), home: readHomeSummary(db, userId), readiness: readiness(db, userId, (dependencies.config ?? configuration)()), generation: publicGeneration(db, userId) })).deferred();
   } finally { db.close(); }
 }
 
-export async function generateRecommendationBatch(requestId: string, dependencies: RecommendationDependencies = {}, options: { saveOnly?: boolean; preferences?: RecommendationPreferences } = {}) {
+export async function generateRecommendationBatch(userId: UserId, requestId: string, dependencies: RecommendationDependencies = {}, options: { saveOnly?: boolean; preferences?: RecommendationPreferences } = {}) {
+  validUserId(userId);
   const open = dependencies.open ?? openDatabase, config = (dependencies.config ?? configuration)();
   let preferences = parsePreferences(options.preferences);
   const requested = options.preferences === undefined ? undefined : preferences;
@@ -74,18 +84,19 @@ export async function generateRecommendationBatch(requestId: string, dependencie
   const ro = open({ readonly: true });
   let store: ReturnType<typeof runStore>;
   try {
-    recommendationSchema(ro); store = runStore(ro.name);
+    recommendationSchema(ro); store = runStore(ro.name, userId);
+    if (store.foreignRequest(requestId)) throw new GenerationError('profile_mismatch',409);
     const existing = store.read(requestId), resultId = existing?.result_id ?? existing?.ranking?.result_id;
     checkSnapshot(existing);
-    if (hasResult(ro, resultId)) return { status: 'ok' as const, replayed: true, saved_count: 0, batch: readRecommendationBatch(ro, resultId!), request_id: requestId };
+    if (hasResult(ro, userId, resultId)) return { status: 'ok' as const, replayed: true, saved_count: 0, batch: readRecommendationBatch(ro, userId, resultId!), request_id: requestId };
     if (options.saveOnly && !existing) throw new GenerationError('saved_result_unavailable', 409);
     if (existing && !(['saving', 'save_failed'].includes(existing.stage) && existing.candidates && existing.ranking)) {
       throw new GenerationError(existing.stage === 'failed' ? 'generation_failed_before' : store.ownerAlive() ? 'generation_busy' : 'generation_interrupted', 409);
     }
     if (!existing) {
-      const ready = readiness(ro, config);
+      const ready = readiness(ro, userId, config);
       if (!ready.can_generate) throw new GenerationError(ready.reason!, ready.reason === 'configuration_missing' ? 503 : 409);
-      buildCandidateContext(ro, undefined, preferences); // Complete free context/size validation before any payment.
+      buildCandidateContext(ro, userId, undefined, preferences); // Complete free context/size validation before any payment.
     }
   } finally { ro.close(); }
   const release = store!.acquire(requestId);
@@ -114,25 +125,25 @@ export async function generateRecommendationBatch(requestId: string, dependencie
     run = store!.read(requestId);
     checkSnapshot(run);
     const existingId = run?.result_id ?? run?.ranking?.result_id;
-    if (hasResult(db, existingId)) return { status: 'ok' as const, replayed: true, saved_count: 0, batch: readRecommendationBatch(db, existingId!), request_id: requestId };
+    if (hasResult(db, userId, existingId)) return { status: 'ok' as const, replayed: true, saved_count: 0, batch: readRecommendationBatch(db, userId, existingId!), request_id: requestId };
     const recovering = run !== null;
     if (options.saveOnly && !recovering) throw new GenerationError('saved_result_unavailable', 409);
     if (recovering && !(['saving', 'save_failed'].includes(run!.stage) && run!.candidates && run!.ranking)) throw new GenerationError('generation_interrupted', 409);
     try { await (dependencies.backup ?? backupForRecommendationWrite)(db); }
     catch { throw new GenerationError('backup_failed'); }
     checkDeadline();
-    migrateDatabase(db);
+    requireProfileSchema(db);
     if (!run) {
-      run = { request_id: requestId, started_at: new Date().toISOString(), stage: 'starting', calls, preferences };
+      run = { user_id: userId, request_id: requestId, started_at: new Date().toISOString(), stage: 'starting', calls, preferences };
       store!.write(run);
       run.stage = 'candidates'; store!.write(run);
-      const candidates = await generateCandidates(db, { live: true, preferences, ...config, openaiFetch: boundedFetch, tmdbFetch: boundedFetch, sleep: boundedSleep });
+      const candidates = await generateCandidates(db, userId, { live: true, preferences, ...config, openaiFetch: boundedFetch, tmdbFetch: boundedFetch, sleep: boundedSleep });
       run.technical_usage = { candidates: candidates.mode === 'live' ? candidates.statistics : null };
       checkDeadline();
       if (candidates.mode !== 'live' || candidates.status !== 'ok') throw new GenerationError('candidates_failed', 502);
       if (!candidates.candidates.length) throw new GenerationError('no_candidates', 422);
       run.candidates = candidates; run.stage = 'ranking'; store!.write(run);
-      const ranking = await rankRecommendations(db, candidates, { live: true, preferences, save: false, apiKey: config.apiKey, model: config.model, fetch: boundedFetch });
+      const ranking = await rankRecommendations(db, userId, candidates, { live: true, preferences, save: false, apiKey: config.apiKey, model: config.model, fetch: boundedFetch });
       checkDeadline();
       run.technical_usage = { ...run.technical_usage, ranking: ranking.statistics };
       if (ranking.status !== 'ok' || !ranking.recommendations.length || !ranking.result_id) throw new GenerationError('ranking_failed', 502);
@@ -140,13 +151,13 @@ export async function generateRecommendationBatch(requestId: string, dependencie
       store!.write(run); // Persist the validated output BEFORE its SQL write, for a free retry.
     }
     checkDeadline(); savePhase = true;
-    const saved = recordRecommendations(db, run.candidates, { result: run.ranking }, { dryRun: false });
+    const saved = recordRecommendations(db, userId, run.candidates, { result: run.ranking }, { dryRun: false });
     if (!saved.saved_count && !saved.already_saved_count) throw new GenerationError('no_eligible_recommendations', 422);
     run.stage = 'saved'; run.code = undefined;
     // SQLite commit is authoritative. A failed final journal update is recoverable from the prepared file.
     try { store!.write(run); } catch { /* Replay finds result_id in SQLite; it never pays again. */ }
     return { status: 'ok' as const, replayed: recovering, saved_count: saved.saved_count,
-      batch: readRecommendationBatch(db, run.ranking!.result_id!), request_id: requestId };
+      batch: readRecommendationBatch(db, userId, run.ranking!.result_id!), request_id: requestId };
   } catch (error) {
     const failure = deadline.signal.aborted ? new GenerationError('generation_timeout', 504) : error instanceof GenerationError ? error :
       new GenerationError(savePhase ? 'save_failed' : run?.stage === 'ranking' ? 'ranking_failed' : 'generation_unavailable', run?.stage === 'ranking' ? 502 : 500);

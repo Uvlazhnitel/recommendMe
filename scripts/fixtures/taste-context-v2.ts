@@ -11,7 +11,7 @@ export function contextFixture(scenario: ContextScenario) {
     f.db.prepare(`INSERT INTO movies(id,title,release_year,tmdb_id,media_type,runtime_minutes,overview,genres_json,directors_json)
       VALUES(?,?,2000,?,'movie',100,?,?,?)`).run(id, `History ${id}`, id + 10000, overview,
       JSON.stringify(genres.map(id => ({ id, name: `Genre ${id}` }))), JSON.stringify(directors.map(id => ({ id, name: `Director ${id}` }))));
-    f.db.prepare('INSERT INTO user_movies(movie_id,watched,rating_100) VALUES(?,1,?)').run(id, rating);
+    f.db.prepare('INSERT INTO user_movies(user_id,movie_id,watched,rating_100) VALUES(\'ilya\',?,1,?)').run(id, rating);
   };
   const candidate = (id: number, genres: number[], directors: number[]): MovieCandidate => ({ ...movie(id),
     genres: genres.map(id => ({ id, name: `Genre ${id}` })), directors: directors.map(id => ({ id, name: `Director ${id}` })), overview: 'A verified candidate story. '.repeat(40) });
@@ -31,7 +31,7 @@ export function contextFixture(scenario: ContextScenario) {
   }
   if (scenario === 'reviews') f.db.prepare('UPDATE user_movies SET review_text=?').run('В этом фильме темп работал иначе. '.repeat(40));
   if (scenario === 'sparse') f.db.exec('UPDATE movies SET overview=NULL');
-  const taste = buildTasteContext(f.db);
+  const taste = buildTasteContext(f.db, 'ilya');
   const profile = JSON.parse((f.db.prepare('SELECT profile_json FROM taste_profile').get() as { profile_json: string }).profile_json);
   if (scenario === 'redundant') profile.strong_preferences.push({ summary: 'Another supported side', explanation: 'A distinct confirmed example.', kind: 'observation',
     uncertainty: 'Not a general genre rule.', evidence: [{ movie_id: 200, rating_100: 90 }] });

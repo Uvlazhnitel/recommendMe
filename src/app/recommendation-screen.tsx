@@ -1,4 +1,5 @@
 'use client';
+import { profileFetch } from './profile-requests';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -15,7 +16,7 @@ import { api, json } from './workbench-api';
 type State = ReturnType<typeof recommendationState>;
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response;
-  try { response = await fetch(url, { ...init, cache: 'no-store' }); }
+  try { response = await profileFetch(url, { ...init, cache: 'no-store' }); }
   catch { throw new Error('Ответ сервера не получен. Состояние можно проверить обновлением; новый платный запрос автоматически не отправляется.'); }
   let body;
   try { body = await response.json(); } catch { throw new Error('Не удалось прочитать ответ приложения. Новый платный запрос автоматически не отправляется.'); }
@@ -45,7 +46,7 @@ export default function RecommendationScreen() {
     window.addEventListener('focus', visible); document.addEventListener('visibilitychange', visible);
     return () => { mounted.current = false; window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible); };
   }, [refresh]);
-  const remoteRunning = data?.generation.state === 'running';
+  const remoteRunning = (data?.generation.state === 'running' || data?.generation.state === 'busy_other');
   useEffect(() => {
     if (!remoteRunning && !generating) return;
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 2500);
@@ -91,7 +92,7 @@ export default function RecommendationScreen() {
   }
   const readinessMessage = data?.readiness.reason === 'configuration_missing' ? 'Для подбора нужно настроить OpenAI, модель и TMDB на сервере.' :
     data?.readiness.reason === 'ratings_missing' ? 'Для подбора нужны текущие оценки фильмов.' :
-    data?.readiness.reason === 'profile_unavailable' ? 'Сохранённый профиль вкуса пока недоступен. Подготовьте его отдельно через CLI.' : '';
+    data?.readiness.reason === 'profile_unavailable' ? 'Сохранённый профиль вкуса пока недоступен. Персональные рекомендации пока недоступны.' : '';
   const remaining = data?.batch?.movies.length ?? 0;
   return <div className="home-v2">
     <header className="home-v2-heading"><div><h1 id="home-results-title" tabIndex={-1}>{data?.batch ? 'Твоя подборка' : 'Что посмотрим?'}</h1>

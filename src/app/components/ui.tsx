@@ -1,7 +1,7 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react';
 import { Icon } from './icons';
 
-export function Button({ tone = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'primary' | 'light' | 'quiet' }) {
+export function Button({ tone = 'primary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'primary' | 'light' | 'quiet'; ref?: Ref<HTMLButtonElement> }) {
   return <button className={`button button-${tone} ${className}`} {...props} />;
 }
 

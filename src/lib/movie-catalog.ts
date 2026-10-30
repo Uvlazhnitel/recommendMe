@@ -1,10 +1,10 @@
+import { requireProfileSchema } from './profiles';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { normalizeTitle, type Details, type TmdbClient } from './tmdb';
 import { backupForRecommendationWrite } from './recommendation-memory';
-import { migrateDatabase } from './migrations';
 
 export type CatalogResult = { status: 'created' | 'already_exists'; movie_id: number; tmdb_id: number } |
   { status: 'possible_duplicate'; tmdb_id: number; matches: { movie_id: number; title: string; year: number | null }[] };
@@ -33,7 +33,7 @@ export async function addCatalogMovie(db: Database.Database, api: Pick<CatalogAp
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}): Promise<CatalogResult> {
   if (!validTmdbId(tmdbId)) throw new Error('Invalid TMDB ID.');
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw new Error('Catalog requires SQLite schema 3, 4, 5, 6 or 7. Run db:init.');
+  requireProfileSchema(db);
   const found = existing(db, tmdbId);
   if (found) return found;
   const details = await api.details(tmdbId);
@@ -44,7 +44,7 @@ export async function addCatalogMovie(db: Database.Database, api: Pick<CatalogAp
     const folder = join(dirname(database.name), 'backups'); mkdirSync(folder, { recursive: true });
     await backupForRecommendationWrite(database, join(folder, `before-catalog-${randomUUID()}.sqlite`));
   }))(db);
-  migrateDatabase(db);
+  requireProfileSchema(db);
   return db.transaction((): CatalogResult => {
     const duplicate = existing(db, tmdbId) ?? conflicts(db, details);
     if (duplicate) return duplicate;

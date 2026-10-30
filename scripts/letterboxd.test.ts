@@ -19,6 +19,7 @@ function fixture(version1 = false) {
   db.pragma('foreign_keys=ON');
   if (version1) { db.exec(readFileSync('migrations/001_initial.sql', 'utf8')); db.pragma('user_version=1'); }
   else migrateDatabase(db);
+  migrateDatabase(db);
   let sequence = 0;
   return { db, backup: () => join(directory, `backup-${sequence++}.sqlite`),
     cleanup: () => { db.close(); rmSync(directory, { recursive: true, force: true }); } };
@@ -36,14 +37,14 @@ test('merge sources, preserve both dates and unrated history; repeated import is
   const f = fixture();
   try {
     const plan = prepareLetterboxd(wh + w + '2020-02-03,Short,2001,uri:short\n', rh + r);
-    const result = await importLetterboxd(f.db, plan, f.backup());
+    const result = await importLetterboxd(f.db, 'ilya', plan, f.backup());
     assert.deepEqual(result.importedHistory, { watched: 2, rated: 1, unrated: 1 });
     assert.equal(result.addedMovies, 2); assert.equal(result.addedHistory, 2);
     assert.deepEqual(f.db.prepare('SELECT rating_100, original_rating_stars, letterboxd_date, letterboxd_rating_date, watched_at FROM user_movies WHERE movie_id=1').get(),
       { rating_100: 90, original_rating_stars: 4.5, letterboxd_date: '2020-01-02', letterboxd_rating_date: '2021-03-04', watched_at: null });
     assert.deepEqual(f.db.prepare('SELECT DISTINCT media_type, tmdb_id, runtime_minutes FROM movies').all(), [{ media_type: 'unknown', tmdb_id: null, runtime_minutes: null }]);
     const before = snapshot(f.db);
-    const repeat = await importLetterboxd(f.db, plan, f.backup());
+    const repeat = await importLetterboxd(f.db, 'ilya', plan, f.backup());
     assert.equal(repeat.addedMovies, 0); assert.equal(repeat.addedHistory, 0); assert.equal(repeat.preservedHistory, 2);
     assert.deepEqual(snapshot(f.db), before);
   } finally { f.cleanup(); }
@@ -55,7 +56,7 @@ test('all exact half-star ratings including zero; empty rating is NULL; invalid 
     const records = Array.from({ length: 11 }, (_, i) => `2020-01-01,Film${i},2000,uri:${i},${i / 2}\n`).join('');
     const plan = prepareLetterboxd(wh, rh + records + '2020-01-01,Empty,2000,uri:empty,\n' +
       ['-1', '5.5', '3.7', 'abc'].map((rating, i) => `2020-01-01,Bad${i},2000,uri:bad${i},${rating}\n`).join(''));
-    const result = await importLetterboxd(f.db, plan, f.backup());
+    const result = await importLetterboxd(f.db, 'ilya', plan, f.backup());
     assert.equal(result.skippedRows, 4); assert.equal(result.status, 'partial');
     assert.deepEqual(f.db.prepare('SELECT rating_100 FROM user_movies ORDER BY movie_id').all(), [...Array.from({ length: 11 }, (_, i) => ({ rating_100: i * 10 })), { rating_100: null }]);
     assert.equal(result.ratingsOutsideWatched, 12);
@@ -76,7 +77,7 @@ test('duplicates collapse, URI conflicts skip entire identity, different URI/yea
   try {
     const plan = prepareLetterboxd(wh + w + w + '2020-01-01,Test,2001,uri:other\n2020-01-01,Test,2000,uri:third\n' +
       '2020-01-01,Conflict,2000,uri:conflict\n2020-01-01,Conflict,2001,uri:conflict\n', rh + r);
-    const result = await importLetterboxd(f.db, plan, f.backup());
+    const result = await importLetterboxd(f.db, 'ilya', plan, f.backup());
     assert.equal(result.addedMovies, 3); assert.equal(result.duplicates, 1); assert.equal(result.skippedRows, 2);
   } finally { f.cleanup(); }
 });
@@ -86,10 +87,10 @@ test('missing URI uses only unambiguous normalized title/year; missing year is r
   try {
     const plan = prepareLetterboxd(wh + w + '2020-01-01,Twin,2000,uri:a\n2020-01-01,Twin,2000,uri:b\n2020-01-01,Unknown,,\n',
       rh + '2020-01-01, test ,2000,,5\n2020-01-01,Twin,2000,,4\n2020-01-01,No URI,2005,,3\n');
-    const result = await importLetterboxd(f.db, plan, f.backup());
+    const result = await importLetterboxd(f.db, 'ilya', plan, f.backup());
     assert.equal(result.addedMovies, 4); assert.equal(result.skippedRows, 2);
     const before = snapshot(f.db);
-    const repeat = await importLetterboxd(f.db, plan, f.backup());
+    const repeat = await importLetterboxd(f.db, 'ilya', plan, f.backup());
     assert.equal(repeat.addedMovies, 0); assert.deepEqual(snapshot(f.db), before);
   } finally { f.cleanup(); }
 });
@@ -98,11 +99,11 @@ test('manual rating, cleared rating, movie metadata, recommendation, profile and
   const f = fixture();
   try {
     const plan = prepareLetterboxd(wh + w + '2020-01-01,Other,2001,uri:other\n', rh + r + '2020-01-01,Other,2001,uri:other,5\n');
-    await importLetterboxd(f.db, plan, f.backup());
+    await importLetterboxd(f.db, 'ilya', plan, f.backup());
     f.db.exec("UPDATE user_movies SET rating_100=12, rating_source='manual', not_interested=1 WHERE movie_id=1; UPDATE user_movies SET rating_100=NULL, rating_source='none' WHERE movie_id=2");
-    f.db.exec("UPDATE movies SET overview='Keep', tmdb_id=42, media_type='movie' WHERE id=1; INSERT INTO recommendations (movie_id, rejected) VALUES (1,1); INSERT INTO taste_profile (profile_json) VALUES ('{}')");
+    f.db.exec("UPDATE movies SET overview='Keep', tmdb_id=42, media_type='movie' WHERE id=1; INSERT INTO recommendations (user_id,movie_id, rejected) VALUES ('ilya',1,1); INSERT INTO taste_profile (user_id,profile_json) VALUES ('ilya','{}')");
     const before = snapshot(f.db);
-    await importLetterboxd(f.db, plan, f.backup());
+    await importLetterboxd(f.db, 'ilya', plan, f.backup());
     assert.deepEqual(snapshot(f.db), before);
   } finally { f.cleanup(); }
 });
@@ -110,13 +111,13 @@ test('manual rating, cleared rating, movie metadata, recommendation, profile and
 test('existing unknown-URI movie can be linked without overwriting personal history; ambiguous library is skipped', async () => {
   const f = fixture();
   try {
-    f.db.exec("INSERT INTO movies (title,release_year,overview) VALUES ('Test',2000,'Keep'); INSERT INTO user_movies (movie_id,rating_100) VALUES (1,80)");
+    f.db.exec("INSERT INTO movies (title,release_year,overview) VALUES ('Test',2000,'Keep'); INSERT INTO user_movies (user_id,movie_id,rating_100) VALUES ('ilya',1,80)");
     const beforeHistory = f.db.prepare('SELECT * FROM user_movies').all();
-    const result = await importLetterboxd(f.db, prepareLetterboxd(wh + w, rh + r), f.backup());
+    const result = await importLetterboxd(f.db, 'ilya', prepareLetterboxd(wh + w, rh + r), f.backup());
     assert.equal(result.attachedUris, 1); assert.equal(result.addedMovies, 0);
     assert.deepEqual(f.db.prepare('SELECT * FROM user_movies').all(), beforeHistory);
     f.db.exec("INSERT INTO movies (title,release_year) VALUES ('Twin',2000),('Twin',2000)");
-    const bad = await importLetterboxd(f.db, prepareLetterboxd(wh + '2020-01-01,Twin,2000,uri:twin\n', rh), f.backup());
+    const bad = await importLetterboxd(f.db, 'ilya', prepareLetterboxd(wh + '2020-01-01,Twin,2000,uri:twin\n', rh), f.backup());
     assert.equal(bad.addedMovies, 0); assert.equal(bad.skippedRows, 1);
   } finally { f.cleanup(); }
 });
@@ -126,12 +127,12 @@ test('backup is readable, backup failure prevents changes, SQL failure rolls bac
   try {
     const plan = prepareLetterboxd(wh + w + '2020-01-01,Other,2000,uri:other\n', rh + r);
     const before = snapshot(f.db);
-    await assert.rejects(() => importLetterboxd(f.db, plan, join(f.backup(), 'missing', 'db.sqlite')));
+    await assert.rejects(() => importLetterboxd(f.db, 'ilya', plan, join(f.backup(), 'missing', 'db.sqlite')));
     assert.deepEqual(snapshot(f.db), before);
     f.db.exec("CREATE TRIGGER fail_import BEFORE INSERT ON movies WHEN NEW.title='Other' BEGIN SELECT RAISE(ABORT, 'forced failure'); END");
     const backup = f.backup();
     const beforeFailure = snapshot(f.db);
-    await assert.rejects(() => importLetterboxd(f.db, plan, backup), /forced failure/);
+    await assert.rejects(() => importLetterboxd(f.db, 'ilya', plan, backup), /forced failure/);
     assert.deepEqual(snapshot(f.db), beforeFailure);
     const restored = new Database(backup, { readonly: true });
     try { assert.deepEqual(restored.prepare('SELECT * FROM movies').all(), []); assert.deepEqual(restored.pragma('integrity_check'), [{ integrity_check: 'ok' }]); }
@@ -139,19 +140,19 @@ test('backup is readable, backup failure prevents changes, SQL failure rolls bac
   } finally { f.cleanup(); }
 });
 
-test('migration from version 1 preserves data and includes new date in update trigger', async () => {
+test('explicit migration from version 1 preserves data and includes new date in update trigger', async () => {
   const f = fixture(true);
   try {
-    f.db.exec("INSERT INTO movies (title,letterboxd_uri) VALUES ('Existing','uri:existing'); INSERT INTO user_movies (movie_id,rating_100,updated_at) VALUES (1,75,'2000-01-01T00:00:00.000Z')");
+    f.db.exec("INSERT INTO movies (title,letterboxd_uri) VALUES ('Existing','uri:existing'); INSERT INTO user_movies (user_id,movie_id,rating_100,updated_at) VALUES ('ilya',1,75,'2000-01-01T00:00:00.000Z')");
     const old = f.db.prepare('SELECT * FROM user_movies').get() as Record<string, unknown>;
     const backup = f.backup();
-    await importLetterboxd(f.db, prepareLetterboxd(wh + w, rh + r), backup);
+    await importLetterboxd(f.db, 'ilya', prepareLetterboxd(wh + w, rh + r), backup);
     assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.deepEqual(f.db.prepare('SELECT * FROM user_movies WHERE movie_id=1').get(), { ...old, letterboxd_rating_date: null, review_text: null });
     f.db.exec("UPDATE user_movies SET letterboxd_rating_date='2020-01-01' WHERE movie_id=1");
     assert.notEqual((f.db.prepare('SELECT updated_at FROM user_movies WHERE movie_id=1').get() as { updated_at: string }).updated_at, old.updated_at);
     const saved = new Database(backup, { readonly: true });
-    try { assert.equal(saved.pragma('user_version', { simple: true }), 1); } finally { saved.close(); }
+    try { assert.equal(saved.pragma('user_version', { simple: true }), SCHEMA_VERSION); } finally { saved.close(); }
   } finally { f.cleanup(); }
 });
 
@@ -166,11 +167,11 @@ test('CLI defaults and arguments, partial reports, missing files and fatal error
     writeFileSync(watched, wh + w + '2020-02-30,Bad,2000,uri:bad\n');
     writeFileSync(ratings, rh + r);
     const run = (args: string[] = []) => spawnSync(process.execPath,
-      ['--import', createRequire(import.meta.url).resolve('tsx'), resolve('scripts/seed-letterboxd.ts'), ...args],
+      ['--import', createRequire(import.meta.url).resolve('tsx'), resolve('scripts/seed-letterboxd.ts'),'--user','ilya', ...args],
       { cwd: directory, env: { ...process.env, DATABASE_PATH: f.db.name }, encoding: 'utf8' });
     const partial = run();
     assert.equal(partial.status, 1, partial.stderr);
-    const reports = join(directory, 'data/import-reports');
+    const reports = join(directory, 'data/import-reports', 'ilya');
     const report = JSON.parse(readFileSync(join(reports, readdirSync(reports)[0]), 'utf8'));
     assert.equal(report.status, 'partial'); assert.equal(report.addedMovies, 1); assert.equal(report.skippedRows, 1);
     assert.equal(readdirSync(join(directory, 'data/backups')).length, 1);

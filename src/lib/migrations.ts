@@ -9,6 +9,7 @@ const migrations = [
   new URL('../../migrations/005_movie_backdrop.sql', import.meta.url),
   new URL('../../migrations/006_movie_reviews.sql', import.meta.url),
   new URL('../../migrations/007_evaluation.sql', import.meta.url),
+  new URL('../../migrations/008_profiles.sql', import.meta.url),
 ];
 
 export const SCHEMA_VERSION = migrations.length;
@@ -24,6 +25,7 @@ export function migrateDatabase(database: Database.Database): number {
       database.exec(readFileSync(migrations[index], 'utf8'));
       database.pragma(`user_version = ${index + 1}`);
     }
+    if ((database.pragma('foreign_key_check') as unknown[]).length) throw new Error('Migration foreign key verification failed.');
     return migrations.length;
   }).immediate();
 }

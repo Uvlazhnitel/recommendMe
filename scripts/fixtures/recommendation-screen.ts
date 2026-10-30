@@ -20,13 +20,14 @@ export function fixture(version = SCHEMA_VERSION) {
     for (const file of ['001_initial','002_letterboxd_rating_date','003_tmdb_metadata','004_recommendation_memory','005_movie_backdrop','006_movie_reviews','007_evaluation'].slice(0,version)) db.exec(readFileSync(`migrations/${file}.sql`, 'utf8'));
     db.pragma(`user_version=${version}`);
   }
+  migrateDatabase(db);
   db.exec(`INSERT INTO movies(id,title,release_year,tmdb_id,media_type,runtime_minutes,overview,genres_json,directors_json) VALUES
     (1,'Favourite',2000,101,'movie',100,'Confirmed story','[{"id":1,"name":"Drama"}]','[{"id":10,"name":"Director"}]'),
     (2,'Low',2000,102,'movie',100,'Confirmed story','[{"id":1,"name":"Drama"}]','[{"id":10,"name":"Director"}]'),
     (3,'Unrated',2000,103,'movie',100,'Confirmed story','[{"id":1,"name":"Drama"}]','[{"id":10,"name":"Director"}]');
-    INSERT INTO user_movies(movie_id,watched,rating_100) VALUES(1,1,100),(2,1,0),(3,1,NULL)`);
-  const context = buildTasteContext(db);
-  db.prepare('INSERT INTO taste_profile(profile_json) VALUES(?)').run(JSON.stringify({
+    INSERT INTO user_movies(user_id,movie_id,watched,rating_100) VALUES('ilya',1,1,100),('ilya',2,1,0),('ilya',3,1,NULL)`);
+  const context = buildTasteContext(db, 'ilya');
+  db.prepare('INSERT INTO taste_profile(user_id,profile_json) VALUES(\'ilya\',?)').run(JSON.stringify({
     strong_preferences: [{ summary: 'Positive', explanation: 'High evidence.', kind: 'observation', uncertainty: 'Small sample.', evidence: [{ movie_id: 1, rating_100: 100 }] }],
     negative_patterns: [{ summary: 'Negative', explanation: 'Low evidence.', kind: 'hypothesis', uncertainty: 'Uncertain cause.', evidence: [{ movie_id: 2, rating_100: 0 }] }],
     contrasts: [{ higher: { movie_id: 1, rating_100: 100 }, lower: { movie_id: 2, rating_100: 0 }, similarity: 'Shared director.', possible_difference: 'Unconfirmed.', uncertainty: 'Limited.' }],

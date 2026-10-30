@@ -20,7 +20,7 @@ test('A/B: forty exact TMDB repeats cannot crowd out a distinct verified LLM hyp
   try {
     const repeated = Array.from({ length: 40 }, (_, i) => ({ ...movie(1000 + i), source: 'tmdb' as const }));
     const unusual = { ...movie(2000), genres: [{ id: 99, name: 'Other' }], directors: [{ id: 99, name: 'Other' }] };
-    const rows = [...repeated, unusual], history = readCandidateHistory(f.db);
+    const rows = [...repeated, unusual], history = readCandidateHistory(f.db, 'ilya');
     const result = selectVerifiedCandidates(rows, history);
     assert.ok(ids(result.candidates).includes(2000)); assert.equal(result.candidates.length, 40);
     assert.equal(result.selection.entries.find(row => row.tmdb_id === 2000)!.support, 'none');
@@ -53,33 +53,33 @@ test('a multi-director/multi-genre group has one first representative despite or
 test('E: existing successes, edited ratings/hiding, an interrupted attempt and save recovery share one authoritative rotation', async () => {
   const f = candidatesFixture(), h = mockProvider([201]), key = randomUUID();
   try {
-    const insert = f.db.prepare('INSERT INTO recommendations(movie_id,result_id,why_fit,possible_mismatch) VALUES(1,?,?,?)');
+    const insert = f.db.prepare('INSERT INTO recommendations(user_id,movie_id,result_id,why_fit,possible_mismatch) VALUES(\'ilya\',1,?,?,?)');
     for (let i = 0; i < 3; i++) insert.run(randomUUID(), 'Confirmed.', 'Uncertain.');
     f.db.exec('UPDATE user_movies SET rating_100=79 WHERE movie_id=10; UPDATE user_movies SET not_interested=1 WHERE movie_id=11');
-    runStore(f.path).write({ request_id: randomUUID(), started_at: new Date().toISOString(), stage: 'ranking' });
-    const before = readFileSync(f.path), c = buildCandidateContext(f.db);
+    runStore(f.path, 'ilya').write({ user_id: 'ilya', request_id: randomUUID(), started_at: new Date().toISOString(), stage: 'ranking' });
+    const before = readFileSync(f.path), c = buildCandidateContext(f.db, 'ilya');
     assert.equal(c.summary.seed_rotation, 3); assert.ok(c.seeds.every(row => ![10, 11].includes(row.movie_id)));
-    assert.deepEqual(buildCandidateContext(f.db).seeds, c.seeds); assert.deepEqual(readFileSync(f.path), before);
+    assert.deepEqual(buildCandidateContext(f.db, 'ilya').seeds, c.seeds); assert.deepEqual(readFileSync(f.path), before);
     f.db.exec("CREATE TRIGGER audit_fail BEFORE INSERT ON recommendations BEGIN SELECT RAISE(ABORT,'Synthetic failure'); END");
     const deps = { open: f.open, config, fetch: h.fetch, sleep: async () => {} };
-    await assert.rejects(() => generateRecommendationBatch(key, deps), /save_failed/);
-    assert.equal(seedRotation(f.db), 3); assert.deepEqual(buildCandidateContext(f.db).seeds, c.seeds);
-    const prepared = runStore(f.path).read(key)!.candidates;
+    await assert.rejects(() => generateRecommendationBatch('ilya', key, deps), /save_failed/);
+    assert.equal(seedRotation(f.db, 'ilya'), 3); assert.deepEqual(buildCandidateContext(f.db, 'ilya').seeds, c.seeds);
+    const prepared = runStore(f.path, 'ilya').read(key)!.candidates;
     f.db.exec('DROP TRIGGER audit_fail');
-    await generateRecommendationBatch(key, deps, { saveOnly: true });
-    assert.equal(seedRotation(f.db), 4); assert.equal(h.bodies.length, 2);
-    assert.deepEqual(runStore(f.path).read(key)!.candidates, prepared);
-    await generateRecommendationBatch(key, deps); assert.equal(seedRotation(f.db), 4); assert.equal(h.bodies.length, 2);
+    await generateRecommendationBatch('ilya', key, deps, { saveOnly: true });
+    assert.equal(seedRotation(f.db, 'ilya'), 4); assert.equal(h.bodies.length, 2);
+    assert.deepEqual(runStore(f.path, 'ilya').read(key)!.candidates, prepared);
+    await generateRecommendationBatch('ilya', key, deps); assert.equal(seedRotation(f.db, 'ilya'), 4); assert.equal(h.bodies.length, 2);
   } finally { f.cleanup(); }
 });
 
 test('three-version comparison preserves seeds and fixed-input wire bytes; cap protects an unusual group', () => {
   const f = candidatesFixture();
   try {
-    const history = readCandidateHistory(f.db), result = selectVerifiedCandidates(f.candidates, history), c = buildCandidateContext(f.db);
+    const history = readCandidateHistory(f.db, 'ilya'), result = selectVerifiedCandidates(f.candidates, history), c = buildCandidateContext(f.db, 'ilya');
     const byId = new Map(f.candidates.map(row => [row.tmdb_id, row]));
-    const previous = buildRankingContext(f.db, old.selected.map((id: number) => byId.get(id)!));
-    const current = buildRankingContext(f.db, result.candidates);
+    const previous = buildRankingContext(f.db, 'ilya', old.selected.map((id: number) => byId.get(id)!));
+    const current = buildRankingContext(f.db, 'ilya', result.candidates);
     assert.equal(wire(previous.input, previous.format), old.ranking_bytes);
     assert.equal(wire(c.input, CANDIDATE_FORMAT), old.candidate_bytes);
     assert.deepEqual(c.seeds.map(row => row.movie_id), old.seeds);
@@ -99,9 +99,9 @@ test('F: a genuinely narrow high-rated history does not select weaker outside se
   try {
     f.db.exec(`UPDATE movies SET genres_json='[{"id":16,"name":"Animation"}]',directors_json='[{"id":10,"name":"Director"}]'`);
     f.add(60, 89, [99], [99]);
-    const c = buildCandidateContext(f.db), byId = new Map(readCandidateHistory(f.db).map(row => [row.id, row]));
+    const c = buildCandidateContext(f.db, 'ilya'), byId = new Map(readCandidateHistory(f.db, 'ilya').map(row => [row.id, row]));
     assert.equal(c.seeds.length, 5);
     assert.ok(c.seeds.every(row => byId.get(row.movie_id)!.rating_100 === 100 && row.movie_id !== 60));
-    assert.deepEqual(buildCandidateContext(f.db).seeds, c.seeds);
+    assert.deepEqual(buildCandidateContext(f.db, 'ilya').seeds, c.seeds);
   } finally { f.cleanup(); }
 });

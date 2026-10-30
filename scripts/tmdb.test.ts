@@ -33,7 +33,8 @@ function fixture(old = false) {
   if (old) {
     db.exec(readFileSync('migrations/001_initial.sql', 'utf8')); db.exec(readFileSync('migrations/002_letterboxd_rating_date.sql', 'utf8')); db.pragma('user_version=2');
   } else migrateDatabase(db);
-  db.exec("INSERT INTO movies (title,release_year,letterboxd_uri) VALUES ('Test',2000,'uri:test'); INSERT INTO user_movies (movie_id,watched,rating_100) VALUES (1,1,0); INSERT INTO recommendations (movie_id) VALUES (1); INSERT INTO taste_profile (profile_json) VALUES ('{}')");
+  migrateDatabase(db);
+  db.exec("INSERT INTO movies (title,release_year,letterboxd_uri) VALUES ('Test',2000,'uri:test'); INSERT INTO user_movies (user_id,movie_id,watched,rating_100) VALUES ('ilya',1,1,0); INSERT INTO recommendations (user_id,movie_id) VALUES ('ilya',1); INSERT INTO taste_profile (user_id,profile_json) VALUES ('ilya','{}')");
   let sequence = 0;
   return { db, directory, path, options: () => ({ backupPath: join(directory, `backup-${sequence++}.sqlite`) }),
     cleanup: () => { db.close(); rmSync(directory, { recursive: true, force: true }); } };
@@ -105,7 +106,7 @@ test('network errors are sanitized; timeouts abort and retry three times', async
   await assert.rejects(() => timeout.details(10), /three attempts/); assert.equal(requests, 3);
 });
 
-test('successful enrichment migrates version 2, preserves source and personal data, resumes without requests', async () => {
+test('successful enrichment uses explicitly migrated schema8, preserves source and personal data, resumes without requests', async () => {
   const f = fixture(true);
   try {
     const preserved = () => ['user_movies', 'recommendations', 'taste_profile'].map(table => f.db.prepare(table === 'recommendations'
@@ -124,12 +125,12 @@ test('successful enrichment migrates version 2, preserves source and personal da
     assert.equal((await enrichTmdb(f.db, repeatClient.api, f.options())).processed, 0);
     assert.equal(repeatClient.calls.length, 0); assert.deepEqual(f.db.serialize(), snapshot);
     const backup = new Database(result.backupPath!, { readonly: true });
-    try { assert.equal(backup.pragma('user_version', { simple: true }), 2); assert.equal((backup.prepare('SELECT tmdb_id FROM movies').get() as { tmdb_id: number | null }).tmdb_id, null); }
+    try { assert.equal(backup.pragma('user_version', { simple: true }), SCHEMA_VERSION); assert.equal((backup.prepare('SELECT tmdb_id FROM movies').get() as { tmdb_id: number | null }).tmdb_id, null); }
     finally { backup.close(); }
   } finally { f.cleanup(); }
 });
 
-test('dry-run opens schema 2 read-only and changes neither file nor schema', async () => {
+test('dry-run opens schema8 read-only and changes neither file nor schema', async () => {
   const f = fixture(true);
   const previous = process.env.DATABASE_PATH;
   try {
@@ -139,7 +140,7 @@ test('dry-run opens schema 2 read-only and changes neither file nor schema', asy
       const before = readFileSync(f.path);
       const result = await enrichTmdb(readonly, happy().api, { dryRun: true, limit: 1 });
       assert.equal(result.matched, 1); assert.equal(result.remainingWithoutId, 1); assert.equal(result.backupPath, null);
-      assert.equal(readonly.pragma('user_version', { simple: true }), 2); assert.deepEqual(readFileSync(f.path), before);
+      assert.equal(readonly.pragma('user_version', { simple: true }), SCHEMA_VERSION); assert.deepEqual(readFileSync(f.path), before);
       assert.throws(() => readonly.exec("UPDATE movies SET title='Wrong'"), /readonly/);
     } finally { readonly.close(); }
   } finally { if (previous === undefined) delete process.env.DATABASE_PATH; else process.env.DATABASE_PATH = previous; f.cleanup(); }

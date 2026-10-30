@@ -1,3 +1,5 @@
+import { requireProfileSchema } from './profiles';
+import { personalScope, type UserId } from './profiles';
 import { parsePreferences, type RecommendationPreferences } from './recommendation-preferences';
 // Node-only SQLite reader; no network, migration or filesystem writes.
 import type Database from 'better-sqlite3';
@@ -23,26 +25,27 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export const isRequestId = (value: unknown): value is string => typeof value === 'string' && uuid.test(value);
 export function recommendationSchema(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (![3, 4, 5, 6, 7].includes(version)) throw new Error('Unsupported recommendation schema.');
+  requireProfileSchema(db);
   return version;
 }
-export function readRecommendationBatch(db: Database.Database, resultId?: string): RecommendationBatch | null {
+export function readRecommendationBatch(db: Database.Database, userId: UserId, resultId?: string): RecommendationBatch | null {
+  personalScope(db, userId);
   return db.transaction(() => {
     if (recommendationSchema(db) < 4) return null;
     const groups = resultId ? [{ result_id: resultId }] : db.prepare(`SELECT result_id FROM recommendations
-      WHERE result_id IS NOT NULL AND result_id NOT LIKE 'manual:%'
-      GROUP BY result_id ORDER BY max(recommended_at) DESC,max(id) DESC`).all() as { result_id: string }[];
+      WHERE user_id=@userId AND result_id IS NOT NULL AND result_id NOT LIKE 'manual:%'
+      GROUP BY result_id ORDER BY max(recommended_at) DESC,max(id) DESC`).all({userId}) as { result_id: string }[];
     // Cooldown prevents a NEW show, not viewing an already saved batch.
-    const history = readCandidateHistory(db).map(row => ({ ...row, last_recommended_at: null }));
+    const history = readCandidateHistory(db, userId).map(row => ({ ...row, last_recommended_at: null }));
     for (const group of groups) {
       if (!meaningful(group.result_id) || (!group.result_id.startsWith('legacy:') && !isRequestId(group.result_id))) continue;
       const rows = db.prepare(`SELECT m.*,r.id,r.movie_id,r.result_id,r.recommended_at,r.why_fit,r.possible_mismatch
-        FROM recommendations r LEFT JOIN movies m ON m.id=r.movie_id WHERE r.result_id=? ORDER BY r.id`).all(group.result_id) as Row[];
+        FROM recommendations r LEFT JOIN movies m ON m.id=r.movie_id WHERE r.user_id=@userId AND r.result_id=? ORDER BY r.id`).all({userId}, group.result_id) as Row[];
       if (!rows.length || rows.length > 5 || rows.some(row => !meaningful(row.why_fit) || !meaningful(row.possible_mismatch)) ||
         new Set(rows.map(row => row.recommended_at)).size !== 1 || !Number.isFinite(Date.parse(rows[0].recommended_at))) continue;
       let preferences: RecommendationPreferences | null = null;
       if (recommendationSchema(db) >= 7) {
-        const metadata = db.prepare('SELECT metadata_json FROM recommendation_evaluation WHERE result_id=?').get(group.result_id) as { metadata_json: string } | undefined;
+        const metadata = db.prepare('SELECT metadata_json FROM recommendation_evaluation WHERE user_id=@userId AND result_id=?').get({userId}, group.result_id) as { metadata_json: string } | undefined;
         try { const raw = metadata ? JSON.parse(metadata.metadata_json).preferences : undefined; if (raw !== undefined) preferences = parsePreferences(raw); } catch { /* Old/invalid optional metadata must not hide saved films. */ }
       }
       const generated = isRequestId(group.result_id);

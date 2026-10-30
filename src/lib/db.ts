@@ -3,14 +3,14 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 
-export function openDatabase(options: { readonly?: boolean } = {}) {
+export function openDatabase(options: { readonly?: boolean; create?: boolean } = {}) {
   const configuredPath = process.env.DATABASE_PATH ?? './data/movies.sqlite';
   if (!configuredPath.trim() || configuredPath === ':memory:') {
     throw new Error('DATABASE_PATH must point to a persistent SQLite file.');
   }
   const databasePath = resolve(process.cwd(), configuredPath);
-  if (!options.readonly) mkdirSync(dirname(databasePath), { recursive: true });
-  const database = new Database(databasePath, { readonly: options.readonly ?? false });
+  if (options.create && !options.readonly) mkdirSync(dirname(databasePath), { recursive: true });
+  const database = new Database(databasePath, { readonly: options.readonly ?? false, fileMustExist: !options.create });
   try {
     database.pragma('foreign_keys = ON');
     return database;
@@ -20,7 +20,7 @@ export function openDatabase(options: { readonly?: boolean } = {}) {
   }
 }
 
-export function checkDatabase(options: { readonly?: boolean } = {}) {
+export function checkDatabase(options: { readonly?: boolean; create?: boolean } = {}) {
   const database = openDatabase(options);
   try {
     database.prepare('SELECT 1').get();

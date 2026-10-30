@@ -1,3 +1,5 @@
+import { profileRoute } from './profile-http';
+import { ProfileError, type UserId } from './profiles';
 import { parsePreferences, type RecommendationPreferences } from './recommendation-preferences';
 import { readJsonBody, JsonInputError, assertWriteOrigin } from './http-json';
 import { isRequestId } from './recommendation-batches';
@@ -25,12 +27,12 @@ const messages: Record<string, string> = {
   generation_unavailable: 'Подбор не завершён. Предыдущая подборка сохранена. Проверьте состояние перед новым платным запуском.',
 };
 export function recommendationHandlers(dependencies: RecommendationDependencies = {}) {
-  return {
-    async get(request?: Request) {
-      try { if (request) assertWriteOrigin(request); return reply(recommendationState(dependencies)); }
-      catch (error) { return reply({ error: error instanceof JsonInputError ? error.code : 'recommendations_unavailable', message: 'Не удалось прочитать сохранённую подборку.' }, error instanceof JsonInputError ? error.status : 503); }
+  const handlers = {
+    async get(request: Request, userId: UserId) {
+      try { if (request) assertWriteOrigin(request); return reply(recommendationState(userId, dependencies)); }
+      catch (error) { if (error instanceof ProfileError) throw error; return reply({ error: error instanceof JsonInputError ? error.code : 'recommendations_unavailable', message: 'Не удалось прочитать сохранённую подборку.' }, error instanceof JsonInputError ? error.status : 503); }
     },
-    async generate(request: Request) {
+    async generate(request: Request, userId: UserId) {
       let requestId: string;
       let preferences: RecommendationPreferences | undefined;
       try {
@@ -43,14 +45,15 @@ export function recommendationHandlers(dependencies: RecommendationDependencies 
         }
         const params = new URL(request.url).searchParams;
         if ([...params.keys()].some(key => key !== 'save_only') || (params.has('save_only') && (params.getAll('save_only').length !== 1 || params.get('save_only') !== '1'))) throw new JsonInputError('invalid_request');
-      } catch (error) { return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_request', message: 'Проверьте подтверждение и идентификатор запроса.' }, error instanceof JsonInputError ? error.status : 400); }
+      } catch (error) { if (error instanceof ProfileError) throw error; return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_request', message: 'Проверьте подтверждение и идентификатор запроса.' }, error instanceof JsonInputError ? error.status : 400); }
       try {
-        const result = await generateRecommendationBatch(requestId, dependencies, { saveOnly: new URL(request.url).searchParams.get('save_only') === '1', preferences });
+        const result = await generateRecommendationBatch(userId, requestId, dependencies, { saveOnly: new URL(request.url).searchParams.get('save_only') === '1', preferences });
         return reply(result, result.replayed ? 200 : 201);
-      } catch (error) {
+      } catch (error) { if (error instanceof ProfileError) throw error;
         const failure = error instanceof GenerationError ? error : new GenerationError('generation_unavailable');
         return reply({ error: failure.code, message: messages[failure.code] ?? messages.generation_unavailable, request_id: requestId }, failure.status);
       }
     },
   };
+  return { get: profileRoute(handlers.get), generate: profileRoute(handlers.generate) };
 }

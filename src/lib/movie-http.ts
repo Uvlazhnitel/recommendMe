@@ -1,3 +1,5 @@
+import { profileRoute } from './profile-http';
+import { ProfileError, requireProfileSchema, type UserId } from './profiles';
 import { JsonInputError, readJsonBody } from './http-json';
 import { openDatabase } from './db';
 import { addCatalogMovie, validTmdbId, type CatalogApi } from './movie-catalog';
@@ -22,6 +24,7 @@ function manualApi(): CatalogApi {
 }
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 function failure(error: unknown) {
+  if (error instanceof ProfileError) throw error;
   if (error instanceof TmdbError) {
     if (error.status === 404) return reply({ error: 'movie_not_found' }, 404);
     return reply({ error: 'tmdb_unavailable', message: 'TMDB is unavailable or its server configuration is invalid.' }, 502);
@@ -31,22 +34,22 @@ function failure(error: unknown) {
 // Dependencies keep route tests on synthetic databases and mocked HTTP only.
 export function movieHandlers(dependencies: { api?: () => CatalogApi; open?: typeof openDatabase;
   backup?: Parameters<typeof addCatalogMovie>[3] } = {}) {
-  return {
-    async search(request: Request) {
+  const handlers = {
+    async search(request: Request, userId: UserId) {
       const url = new URL(request.url);
       const query = url.searchParams.get('q')?.trim() ?? '';
       const yearValue = url.searchParams.get('year');
       if (!query || [...query].length > 200 || (yearValue !== null && (!/^\d{1,4}$/.test(yearValue) || Number(yearValue) < 1))) {
         return reply({ error: 'invalid_search', message: 'q must contain 1–200 characters; year must be an integer from 1 to 9999.' }, 400);
       }
-      try { return reply(await (dependencies.api ?? manualApi)().searchInteractive(query, yearValue === null ? undefined : Number(yearValue))); }
-      catch (error) { return failure(error); }
+      try { const db=(dependencies.open??openDatabase)({readonly:true});try{requireProfileSchema(db);}finally{db.close();} return reply(await (dependencies.api ?? manualApi)().searchInteractive(query, yearValue === null ? undefined : Number(yearValue))); }
+      catch (error) { if (error instanceof ProfileError) throw error; return failure(error); }
     },
-    async add(request: Request) {
+    async add(request: Request, userId: UserId) {
       let body: unknown;
       try {
         body = await readJsonBody(request);
-      } catch (error) { return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_json' }, error instanceof JsonInputError ? error.status : 400); }
+      } catch (error) { if (error instanceof ProfileError) throw error; return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_json' }, error instanceof JsonInputError ? error.status : 400); }
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 ||
         !('tmdb_id' in body) || !validTmdbId(body.tmdb_id)) return reply({ error: 'invalid_tmdb_id', message: 'Provide only a positive integer tmdb_id.' }, 400);
       let db: ReturnType<typeof openDatabase> | undefined;
@@ -55,8 +58,9 @@ export function movieHandlers(dependencies: { api?: () => CatalogApi; open?: typ
         // Delay API construction until details are needed: existing IDs work without a configured key.
         const result = await addCatalogMovie(db, { details: id => (dependencies.api ?? manualApi)().details(id) }, body.tmdb_id, dependencies.backup);
         return reply(result, result.status === 'created' ? 201 : result.status === 'possible_duplicate' ? 409 : 200);
-      } catch (error) { return failure(error); }
+      } catch (error) { if (error instanceof ProfileError) throw error; return failure(error); }
       finally { db?.close(); }
     },
   };
+  return { search: profileRoute(handlers.search), add: profileRoute(handlers.add) };
 }

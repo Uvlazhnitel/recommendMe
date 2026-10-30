@@ -1,3 +1,4 @@
+import { personalScope, type UserId } from './profiles';
 // Small readonly summary; never ship the library or reviews to the home screen.
 import type Database from 'better-sqlite3';
 export type FavoriteMovie = { movie_id: number; title: string; year: number | null; poster_path: string | null; rating_100: number };
@@ -6,11 +7,12 @@ function ids(raw: string | null): number[] {
   try { const value = JSON.parse(raw ?? '[]'); return Array.isArray(value) ? [...new Set<number>(value.flatMap(v => v && Number.isSafeInteger(v.id) && v.id > 0 ? [v.id] : []))] : []; }
   catch { return []; }
 }
-export function readHomeSummary(db: Database.Database) {
-  const stats = db.prepare(`SELECT count(*) watched,count(rating_100) rated FROM user_movies WHERE watched=1`).get() as { watched: number; rated: number };
+export function readHomeSummary(db: Database.Database, userId: UserId) {
+  personalScope(db, userId);
+  const stats = db.prepare(`SELECT count(*) watched,count(rating_100) rated FROM user_movies WHERE user_id=@userId AND watched=1`).get({userId}) as { watched: number; rated: number };
   const pool = (db.prepare(`SELECT m.id movie_id,coalesce(m.tmdb_title,m.title) title,coalesce(m.release_year,m.tmdb_release_year) year,
-    m.poster_path,u.rating_100,m.genres_json,m.directors_json FROM movies m JOIN user_movies u ON u.movie_id=m.id
-    WHERE u.watched=1 AND u.rating_100>=80 ORDER BY u.rating_100 DESC,m.id ASC LIMIT 60`).all() as Row[])
+    m.poster_path,u.rating_100,m.genres_json,m.directors_json FROM movies m JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId
+    WHERE u.watched=1 AND u.rating_100>=80 ORDER BY u.rating_100 DESC,m.id ASC LIMIT 60`).all({userId}) as Row[])
     .map(row => ({ row, genres: ids(row.genres_json), directors: ids(row.directors_json) }));
   const selected: typeof pool = [];
   const repeats = (v: typeof pool[number]) => selected.reduce((n, s) => n + v.directors.filter(id => s.directors.includes(id)).length, 0);

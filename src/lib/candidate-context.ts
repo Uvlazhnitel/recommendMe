@@ -1,3 +1,4 @@
+import { personalScope, type UserId } from './profiles';
 import { parsePreferences, customPreferences, preferenceGuidance, type RecommendationPreferences } from './recommendation-preferences';
 import type Database from 'better-sqlite3';
 import { buildTasteContext } from './taste-context';
@@ -23,11 +24,12 @@ Only suggest movies, never TV or shorts; feature length means at least 60 minute
 export type HistoryRow = { id: number; title: string; release_year: number | null; tmdb_id: number | null; tmdb_title: string | null;
   original_title: string | null; overview: string | null; tmdb_release_year: number | null; media_type: string; runtime_minutes: number | null; genres_json: string | null;
   directors_json: string | null; watched: number | null; not_interested: number | null; rating_100: number | null; last_recommended_at: string | null };
-export function readCandidateHistory(db: Database.Database): HistoryRow[] {
+export function readCandidateHistory(db: Database.Database, userId: UserId): HistoryRow[] {
+  personalScope(db, userId);
   return db.prepare(`SELECT m.id,m.title,m.release_year,m.tmdb_id,m.tmdb_title,m.original_title,m.tmdb_release_year,m.media_type,
     m.runtime_minutes,m.overview,m.genres_json,m.directors_json,u.watched,u.not_interested,u.rating_100,
-    (SELECT max(r.recommended_at) FROM recommendations r WHERE r.movie_id=m.id) last_recommended_at FROM movies m
-    LEFT JOIN user_movies u ON u.movie_id=m.id ORDER BY m.id`).all() as HistoryRow[];
+    (SELECT max(r.recommended_at) FROM recommendations r WHERE r.user_id=@userId AND r.movie_id=m.id) last_recommended_at FROM movies m
+    LEFT JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId ORDER BY m.id`).all({userId}) as HistoryRow[];
 }
 export function blockedReason(movie: { id: number; title: string; original_title: string | null; year: number | null }, history: HistoryRow[], now = Date.now()) {
   const titles = [movie.title, movie.original_title].filter((title): title is string => title !== null).map(normalizeTitle);
@@ -53,20 +55,22 @@ export function blockedReason(movie: { id: number; title: string; original_title
   }
   return null;
 }
-export function seedRotation(db: Database.Database): number {
+export function seedRotation(db: Database.Database, userId: UserId): number {
+  personalScope(db, userId);
   if ((db.pragma('user_version', { simple: true }) as number) < 4) return 0;
   const rows = db.prepare(`SELECT result_id,why_fit,possible_mismatch FROM recommendations
-    WHERE result_id IS NOT NULL AND result_id NOT LIKE 'manual:%'`).all() as
+    WHERE user_id=@userId AND result_id IS NOT NULL AND result_id NOT LIKE 'manual:%'`).all({userId}) as
     { result_id: string; why_fit: string | null; possible_mismatch: string | null }[];
   return new Set(rows.filter(row => row.why_fit?.trim() && row.possible_mismatch?.trim()).map(row => row.result_id)).size;
 }
 // Shared read-only preparation; neither generator calls an API or regenerates a profile here.
-export function prepareTasteInputs(db: Database.Database) {
-  const saved = readTasteProfile(db);
+export function prepareTasteInputs(db: Database.Database, userId: UserId) {
+  personalScope(db, userId);
+  const saved = readTasteProfile(db, userId);
   if (!saved) throw new Error('No saved taste profile. Create one separately with npm run taste:generate -- --live; it will not be generated automatically.');
-  const history = readCandidateHistory(db), byId = new Map(history.map(row => [row.id, row]));
+  const history = readCandidateHistory(db, userId), byId = new Map(history.map(row => [row.id, row]));
   const rated = history.filter(row => row.rating_100 !== null);
-  const taste = rated.length ? buildTasteContext(db) : null;
+  const taste = rated.length ? buildTasteContext(db, userId) : null;
   const before = new Map(saved.ratings_snapshot.map(row => [row.movie_id, row.rating_100]));
   const ids = new Set([...before.keys(), ...rated.map(row => row.id)]);
   const changes = [...ids].sort((a, b) => a - b).flatMap(id => {
@@ -77,7 +81,7 @@ export function prepareTasteInputs(db: Database.Database) {
   const evidenceIds = new Set([...saved.strong_preferences, ...saved.negative_patterns, ...saved.uncertainties].flatMap(item => item.evidence.map(ref => ref.movie_id)));
   saved.contrasts.forEach(pair => { evidenceIds.add(pair.higher.movie_id); evidenceIds.add(pair.lower.movie_id); });
   const evidenceMovies = [...evidenceIds].sort((a, b) => a - b).map(id => ({ movie_id: id, title: byId.get(id)?.title ?? null, year: byId.get(id)?.release_year ?? null, current_rating_100: byId.get(id)?.rating_100 ?? null }));
-  const reviews = readReviewTexts(db);
+  const reviews = readReviewTexts(db, userId);
   const pool = examplePool(history, profile, reviews);
   const examples = selectGeneralExamples(pool, taste?.context.contrast_pairs ?? []).map(row => ({ ...row,
     overview: row.overview && taste?.summary.overview_limit ? [...row.overview].slice(0, taste.summary.overview_limit).join('') : null }));
@@ -86,10 +90,11 @@ export function prepareTasteInputs(db: Database.Database) {
   const profileRefresh = describeTasteRefresh(changes, taste?.fingerprint === saved.context_fingerprint, reviewDelta);
   return { saved, history, byId, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh, reviews, changedReviews, pool };
 }
-export function buildCandidateContext(db: Database.Database, maxBytes: number = CANDIDATE_LIMITS.input_bytes, preferences?: RecommendationPreferences) {
+export function buildCandidateContext(db: Database.Database, userId: UserId, maxBytes: number = CANDIDATE_LIMITS.input_bytes, preferences?: RecommendationPreferences) {
+  personalScope(db, userId);
   const wishes = parsePreferences(preferences), guidance = preferenceGuidance(wishes);
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid candidate input byte limit.');
-  const { saved, history, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh, reviews, changedReviews } = prepareTasteInputs(db);
+  const { saved, history, rated, taste, changes, profile, evidenceMovies, examples, profileRefresh, reviews, changedReviews } = prepareTasteInputs(db, userId);
   const exclusions = history.filter(row => row.watched || row.not_interested || recentlyRecommended(row.last_recommended_at)).map(row => ({ title: row.title, year: row.release_year }));
   let descriptionLimit = 600, perGroup = 10, pairs = 6, includeExclusions = true;
   const make = (includeReviews = true) => ({ ...(customPreferences(wishes) ? { request_preferences: wishes } : {}), profile, profile_evidence_movies: evidenceMovies, rating_changes: changes,
@@ -117,7 +122,7 @@ export function buildCandidateContext(db: Database.Database, maxBytes: number = 
     context = make();
     trimReviewExcerpts(context.examples, size() - reviewInputBudget(baselineBytes, context.examples));
   }
-  const stale = taste?.fingerprint !== saved.context_fingerprint, rotation = seedRotation(db);
+  const stale = taste?.fingerprint !== saved.context_fingerprint, rotation = seedRotation(db, userId);
   return { input: input(), context, seeds: selectSeeds(history, profile, rotation), history, summary: { seed_rotation: rotation, profile_version: saved.profile_version, profile_prompt_version: saved.prompt_version, profile_schema_version: saved.schema_version,
     profile_status: stale ? 'stale' : 'current', ratings_count: rated.length, rating_changes: changes.length, examples: context.examples.length,
     contrasts: context.contrasts.length, profile_refresh: profileRefresh, review_context: reviewContextSize(baselineBytes, size()), input_bytes: size(), estimated_input_tokens: Math.ceil(size() / 3),

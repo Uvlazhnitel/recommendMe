@@ -27,7 +27,7 @@ const seedIds = (rows: ReturnType<typeof selectSeeds>) => rows.map(row => row.mo
 const ids = (rows: MovieCandidate[]) => rows.map(row => row.tmdb_id);
 const selection = (rows: MovieCandidate[], past: HistoryRow[] = []) => selectVerifiedCandidates(rows, past);
 const savedBatch = (f: ReturnType<typeof fixture>, id: string | null, why: string | null = 'Confirmed explanation.', mismatch: string | null = 'Known uncertainty.') => {
-  f.db.prepare('INSERT INTO recommendations(movie_id,result_id,why_fit,possible_mismatch) VALUES(1,?,?,?)').run(id, why, mismatch);
+  f.db.prepare('INSERT INTO recommendations(user_id,movie_id,result_id,why_fit,possible_mismatch) VALUES(\'ilya\',1,?,?,?)').run(id, why, mismatch);
 };
 const serialized = (input: unknown, format: unknown) => JSON.stringify({ input, text: { format } });
 const measure = (input: unknown, format: unknown) => {
@@ -39,10 +39,10 @@ const wireOverhead = wireBytes([], {}) - Buffer.byteLength(serialized([], {}));
 test('seeds 1: multiple high-rated directions expand coverage beyond a narrow old five', () => {
   const f = candidatesFixture();
   try {
-    const c = buildCandidateContext(f.db);
+    const c = buildCandidateContext(f.db, 'ilya');
     assert.deepEqual(seedIds(baseline.audit44.seeds), [10, 11, 12, 13, 14]);
     assert.deepEqual(seedIds(c.seeds), [1, 10, 14, 30, 31]);
-    const byId = new Map(readCandidateHistory(f.db).map(row => [row.id, row]));
+    const byId = new Map(readCandidateHistory(f.db, 'ilya').map(row => [row.id, row]));
     assert.equal(new Set(c.seeds.map(row => byId.get(row.movie_id)!.genres_json)).size, 5);
   } finally { f.cleanup(); }
 });
@@ -92,32 +92,32 @@ test('seeds 10: only distinct saved batches with explanations advance rotation, 
   const f = fixture();
   try {
     const past = Array.from({ length: 8 }, (_, i) => history(i + 1, { genres_json: JSON.stringify(metadata([16])), directors_json: JSON.stringify(metadata([10])) }));
-    assert.equal(seedRotation(f.db), 0);
-    const first = selectSeeds(past, empty, seedRotation(f.db));
+    assert.equal(seedRotation(f.db, 'ilya'), 0);
+    const first = selectSeeds(past, empty, seedRotation(f.db, 'ilya'));
     const key = randomUUID(); savedBatch(f, key);
-    const second = selectSeeds(past, empty, seedRotation(f.db));
+    const second = selectSeeds(past, empty, seedRotation(f.db, 'ilya'));
     assert.notDeepEqual(new Set(seedIds(first)), new Set(seedIds(second)));
-    f.db.prepare('INSERT INTO recommendations(movie_id,result_id,why_fit,possible_mismatch) VALUES(2,?,?,?)').run(key, 'Another explanation', 'Uncertain');
-    assert.equal(seedRotation(f.db), 1);
-    savedBatch(f, 'legacy:confirmed'); assert.equal(seedRotation(f.db), 2);
+    f.db.prepare('INSERT INTO recommendations(user_id,movie_id,result_id,why_fit,possible_mismatch) VALUES(\'ilya\',2,?,?,?)').run(key, 'Another explanation', 'Uncertain');
+    assert.equal(seedRotation(f.db, 'ilya'), 1);
+    savedBatch(f, 'legacy:confirmed'); assert.equal(seedRotation(f.db, 'ilya'), 2);
     savedBatch(f, 'manual:ids'); savedBatch(f, null); savedBatch(f, 'missing:why', null); savedBatch(f, 'blank:why', '  '); savedBatch(f, 'missing:mismatch', 'Yes', null);
     savedBatch(f, 'blank:unicode', '\t\n\u00a0'); savedBatch(f, 'blank:mismatch', 'Yes', '\t\n');
-    assert.equal(seedRotation(f.db), 2);
-    f.db.exec('UPDATE user_movies SET not_interested=1,watched=1'); assert.equal(seedRotation(f.db), 2);
+    assert.equal(seedRotation(f.db, 'ilya'), 2);
+    f.db.exec('UPDATE user_movies SET not_interested=1,watched=1'); assert.equal(seedRotation(f.db, 'ilya'), 2);
   } finally { f.cleanup(); }
 });
 
 test('seeds 11: failed/unfinished journals and repeated dry-run preparation do not rotate or write', async () => {
   const f = fixture(), before = readFileSync(f.path);
   try {
-    runStore(f.path).write({ request_id: randomUUID(), started_at: new Date().toISOString(), stage: 'failed' });
-    runStore(f.path).write({ request_id: randomUUID(), started_at: new Date().toISOString(), stage: 'ranking' });
+    runStore(f.path, 'ilya').write({ user_id: 'ilya', request_id: randomUUID(), started_at: new Date().toISOString(), stage: 'failed' });
+    runStore(f.path, 'ilya').write({ user_id: 'ilya', request_id: randomUUID(), started_at: new Date().toISOString(), stage: 'ranking' });
     f.db.pragma('query_only=ON');
-    const a = await generateCandidates(f.db), b = await generateCandidates(f.db);
-    assert.deepEqual(a, b); assert.equal(seedRotation(f.db), 0); assert.deepEqual(readFileSync(f.path), before);
+    const a = await generateCandidates(f.db, 'ilya'), b = await generateCandidates(f.db, 'ilya');
+    assert.deepEqual(a, b); assert.equal(seedRotation(f.db, 'ilya'), 0); assert.deepEqual(readFileSync(f.path), before);
   } finally { f.cleanup(); }
   const old = fixture(3);
-  try { assert.equal(seedRotation(old.db), 0); } finally { old.cleanup(); }
+  try { assert.equal(seedRotation(old.db, 'ilya'), 0); } finally { old.cleanup(); }
 });
 
 test('seeds 12: input permutation, rotation and repeated preparation are reproducible and pure', () => {
@@ -155,7 +155,7 @@ for (const n of [25, 40, 44, 55]) test(`candidate sizes 1–4: ${n} verified fil
 test('candidates 5/7: late TMDB alternatives survive and one unusual LLM group also receives a chance', () => {
   const f = candidatesFixture();
   try {
-    const result = selection(f.candidates, readCandidateHistory(f.db));
+    const result = selection(f.candidates, readCandidateHistory(f.db, 'ilya'));
     assert.deepEqual(baseline.audit44.excluded, [2016, 2017, 2018, 2019]);
     assert.deepEqual(result.selection.entries.filter(row => !row.selected).map(row => row.tmdb_id), [1019, 1021, 1022, 1023]);
     assert.deepEqual(result.selection.after, { llm: 20, tmdb: 20, both: 0 });
@@ -169,7 +169,7 @@ test('candidates 6: all 24 supported LLM entries survive weak TMDB alternatives 
   try {
     const rows = f.candidates.map(row => ({ ...row, ...(row.source === 'llm' ? { genres: metadata([16, 12, row.tmdb_id + 10000]), directors: metadata([400]) } :
       row.tmdb_id >= 2016 ? { genres: metadata([901]), directors: metadata([9999]) } : {}) }));
-    assert.deepEqual(selection(rows, readCandidateHistory(f.db)).selection.after, { llm: 24, tmdb: 16, both: 0 });
+    assert.deepEqual(selection(rows, readCandidateHistory(f.db, 'ilya')).selection.after, { llm: 24, tmdb: 16, both: 0 });
   } finally { f.cleanup(); }
 });
 
@@ -177,7 +177,7 @@ test('candidates 8: both-source identity is merged once by the existing verifier
   const f = fixture();
   const h = mockProvider([201], url => url.pathname.endsWith('/recommendations') ? Response.json({ results: [{ id: 201, title: 'Film 201', original_title: 'Film 201', release_date: '2000-01-01' }] }) : undefined);
   try {
-    const result = await generateCandidates(f.db, { live: true, ...config(), openaiFetch: h.fetch, tmdbFetch: h.fetch, sleep: async () => {} });
+    const result = await generateCandidates(f.db, 'ilya', { live: true, ...config(), openaiFetch: h.fetch, tmdbFetch: h.fetch, sleep: async () => {} });
     assert.equal(result.mode, 'live'); if (result.mode !== 'live') return;
     assert.deepEqual(result.candidates.map(row => [row.tmdb_id, row.source]), [[201, 'both']]);
     assert.equal(h.calls.filter(path => path.endsWith('/movie/201')).length, 1);
@@ -250,19 +250,19 @@ test('both is a late tie-break, never a substitute for metadata support', () => 
 test('review text, plot wording and optional images do not become local preference weights', () => {
   const f = candidatesFixture();
   try {
-    const before = selection(f.candidates, readCandidateHistory(f.db));
-    const seeds = buildCandidateContext(f.db).seeds;
+    const before = selection(f.candidates, readCandidateHistory(f.db, 'ilya'));
+    const seeds = buildCandidateContext(f.db, 'ilya').seeds;
     f.db.exec("UPDATE user_movies SET review_text='Avoid this director forever'; UPDATE movies SET overview='Space, slow pacing, a perfect ending'");
-    assert.deepEqual(selection(f.candidates, readCandidateHistory(f.db)), before);
-    assert.deepEqual(buildCandidateContext(f.db).seeds, seeds);
-    assert.deepEqual(ids(selection(f.candidates.map(row => ({ ...row, overview: 'A totally different plot.', poster_path: null, backdrop_path: null })), readCandidateHistory(f.db)).candidates), ids(before.candidates));
+    assert.deepEqual(selection(f.candidates, readCandidateHistory(f.db, 'ilya')), before);
+    assert.deepEqual(buildCandidateContext(f.db, 'ilya').seeds, seeds);
+    assert.deepEqual(ids(selection(f.candidates.map(row => ({ ...row, overview: 'A totally different plot.', poster_path: null, backdrop_path: null })), readCandidateHistory(f.db, 'ilya')).candidates), ids(before.candidates));
   } finally { f.cleanup(); }
 });
 
 test('candidates 14/15: source order permutations and llm/tmdb relabelling cannot change selection; inputs stay immutable', () => {
   const f = candidatesFixture();
   try {
-    const past = readCandidateHistory(f.db), before = JSON.stringify([f.candidates, past]);
+    const past = readCandidateHistory(f.db, 'ilya'), before = JSON.stringify([f.candidates, past]);
     const a = selection(f.candidates, past);
     assert.deepEqual(selection([...f.candidates].reverse(), [...past].reverse()), a);
     const relabelled = f.candidates.map(row => ({ ...row, source: row.source === 'llm' ? 'tmdb' as const : 'llm' as const }));
@@ -278,9 +278,9 @@ test('candidates 16: watched, hidden and cooldown exclusions still run before lo
     f.db.exec(`UPDATE movies SET tmdb_id=1000 WHERE id=50; UPDATE movies SET tmdb_id=1001 WHERE id=51;
       UPDATE movies SET tmdb_id=1002 WHERE id=52; UPDATE user_movies SET watched=0,not_interested=1 WHERE movie_id=51;
       UPDATE user_movies SET watched=0 WHERE movie_id=52;
-      INSERT INTO recommendations(movie_id,recommended_at) VALUES(52,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`);
+      INSERT INTO recommendations(user_id,movie_id,recommended_at) VALUES('ilya',52,strftime('%Y-%m-%dT%H:%M:%fZ','now'))`);
     const before = readFileSync(f.path); f.db.pragma('query_only=ON');
-    const result = await generateCandidates(f.db, { live: true, ...config(), openaiFetch: f.fetch, tmdbFetch: f.fetch, sleep: async () => {} });
+    const result = await generateCandidates(f.db, 'ilya', { live: true, ...config(), openaiFetch: f.fetch, tmdbFetch: f.fetch, sleep: async () => {} });
     if (result.mode !== 'live') throw Error('Expected mocked live mode');
     assert.ok([1000, 1001, 1002].every(id => !ids(result.candidates).includes(id)));
     assert.ok(['watched', 'not_interested', 'recently_recommended'].every(reason => result.rejected_by_reason[reason] > 0));
@@ -292,7 +292,7 @@ for (const name of contextScenarios) test(`unchanged Taste Context wire bytes/ha
   const f = contextFixture(name);
   try {
     const before = readFileSync(f.path); f.db.pragma('query_only=ON');
-    const c = buildCandidateContext(f.db), r = buildRankingContext(f.db, f.candidates);
+    const c = buildCandidateContext(f.db, 'ilya'), r = buildRankingContext(f.db, 'ilya', f.candidates);
     assert.deepEqual(measure(c.input, CANDIDATE_FORMAT), baseline.scenarios[name].candidate);
     assert.deepEqual(measure(r.input, r.format), baseline.scenarios[name].ranking);
     assert.equal(wireBytes(c.input, CANDIDATE_FORMAT), baseline.scenarios[name].candidate.bytes + wireOverhead);
@@ -306,12 +306,12 @@ test('44-candidate mocked pipeline preserves two calls, budgets, schemas, recove
   try {
     const profile = f.db.prepare('SELECT * FROM taste_profile').get();
     const dependencies = { open: f.open, config, fetch: f.fetch, sleep: async () => {} };
-    const result = await generateRecommendationBatch(key, dependencies);
-    assert.equal(result.saved_count, 5); assert.equal(seedRotation(f.db), 1);
+    const result = await generateRecommendationBatch('ilya', key, dependencies);
+    assert.equal(result.saved_count, 5); assert.equal(seedRotation(f.db, 'ilya'), 1);
     assert.equal(f.bodies.length, 2); assert.equal(f.calls.filter(path => path.startsWith('api.themoviedb.org')).length, 73);
     assert.deepEqual(f.bodies.map(body => body.model), ['mock-model', 'mock-model']);
     assert.deepEqual((f.bodies[0].text as { format: unknown }).format, CANDIDATE_FORMAT);
-    const run = runStore(f.path).read(key)!;
+    const run = runStore(f.path, 'ilya').read(key)!;
     if (run.candidates?.mode !== 'live') throw Error('Missing candidates');
     const candidates = run.candidates;
     assert.equal(candidates.statistics.details_checked, 44); assert.equal(candidates.statistics.tmdb_proposals, 20);
@@ -325,8 +325,8 @@ test('44-candidate mocked pipeline preserves two calls, budgets, schemas, recove
       assert.ok(!('selection' in payload)); assert.ok(!('seed_rotation' in payload));
     }
     assert.deepEqual(f.db.prepare('SELECT * FROM taste_profile').get(), profile);
-    assert.equal((await generateRecommendationBatch(key, dependencies)).replayed, true);
-    assert.equal(f.bodies.length, 2); assert.equal(seedRotation(f.db), 1);
+    assert.equal((await generateRecommendationBatch('ilya', key, dependencies)).replayed, true);
+    assert.equal(f.bodies.length, 2); assert.equal(seedRotation(f.db, 'ilya'), 1);
     console.log('CANDIDATES_V2_PIPELINE', JSON.stringify({ openai: f.bodies.length, tmdb: candidates.statistics.tmdb_requests, details: 44, before: candidates.selection.before, after: candidates.selection.after,
       old_excluded: baseline.audit44.excluded, new_excluded: candidates.selection.entries.filter(row => !row.selected), old_seeds: seedIds(baseline.audit44.seeds), new_seeds: seedIds(candidates.seed_selection.seeds),
       candidate_bytes: [baseline.audit44.candidate.bytes, measure(f.bodies[0].input, CANDIDATE_FORMAT).bytes], ranking_bytes: [baseline.audit44.ranking.bytes, measure(f.bodies[1].input, (f.bodies[1].text as { format: unknown }).format).bytes],
@@ -340,9 +340,9 @@ test('legacy candidate reports remain readable and selector diagnostics do not a
     const old = { mode: 'live', status: 'ok', candidates: f.candidates.slice(0, 40) };
     const report = { ...old, selection: selection(old.candidates).selection };
     assert.deepEqual(parseCandidateReport(old), parseCandidateReport(report));
-    const r = buildRankingContext(f.db, old.candidates);
+    const r = buildRankingContext(f.db, 'ilya', old.candidates);
     assert.deepEqual(measure(r.input, r.format), baseline.audit44.ranking);
-    assert.deepEqual(measure(buildCandidateContext(f.db).input, CANDIDATE_FORMAT), baseline.audit44.candidate);
+    assert.deepEqual(measure(buildCandidateContext(f.db, 'ilya').input, CANDIDATE_FORMAT), baseline.audit44.candidate);
   } finally { f.cleanup(); }
 });
 
@@ -350,8 +350,8 @@ test('manual CLI recording does not advance the saved generation cycle', () => {
   const f = fixture();
   try {
     const report = { mode: 'live', status: 'ok', candidates: [movie()] };
-    recordRecommendations(f.db, report, { tmdbIds: [201] }, { dryRun: false });
-    assert.equal(seedRotation(f.db), 0);
+    recordRecommendations(f.db, 'ilya', report, { tmdbIds: [201] }, { dryRun: false });
+    assert.equal(seedRotation(f.db, 'ilya'), 0);
   } finally { f.cleanup(); }
 });
 
@@ -360,9 +360,9 @@ test('a real mocked generation failure keeps the same seeds and does not advance
   const h = mockProvider([201], (url, init) => url.hostname === 'api.openai.com' && JSON.parse(String(init?.body)).text.format.name === 'personal_movie_ranking'
     ? Response.json({ status: 'failed' }) : undefined);
   try {
-    const before = buildCandidateContext(f.db).seeds;
-    await assert.rejects(() => generateRecommendationBatch(randomUUID(), { open: f.open, config, fetch: h.fetch, sleep: async () => {} }), /ranking_failed/);
-    assert.equal(seedRotation(f.db), 0); assert.deepEqual(buildCandidateContext(f.db).seeds, before);
+    const before = buildCandidateContext(f.db, 'ilya').seeds;
+    await assert.rejects(() => generateRecommendationBatch('ilya', randomUUID(), { open: f.open, config, fetch: h.fetch, sleep: async () => {} }), /ranking_failed/);
+    assert.equal(seedRotation(f.db, 'ilya'), 0); assert.deepEqual(buildCandidateContext(f.db, 'ilya').seeds, before);
     assert.equal(h.calls.filter(path => path.startsWith('api.openai.com')).length, 2);
     assert.equal((f.db.prepare('SELECT count(*) n FROM recommendations').get() as { n: number }).n, 0);
   } finally { f.cleanup(); }
@@ -373,15 +373,15 @@ test('free save-only recovery advances rotation once and reuses the prepared poo
   const dependencies = { open: f.open, config, fetch: h.fetch, sleep: async () => {} };
   try {
     f.db.exec("CREATE TRIGGER fail_save BEFORE INSERT ON recommendations BEGIN SELECT RAISE(ABORT, 'Synthetic save failure'); END");
-    await assert.rejects(() => generateRecommendationBatch(key, dependencies), /save_failed/);
-    assert.equal(seedRotation(f.db), 0); assert.equal(h.bodies.length, 2);
-    const prepared = runStore(f.path).read(key)!.candidates;
+    await assert.rejects(() => generateRecommendationBatch('ilya', key, dependencies), /save_failed/);
+    assert.equal(seedRotation(f.db, 'ilya'), 0); assert.equal(h.bodies.length, 2);
+    const prepared = runStore(f.path, 'ilya').read(key)!.candidates;
     f.db.exec('DROP TRIGGER fail_save');
-    assert.equal((await generateRecommendationBatch(key, dependencies, { saveOnly: true })).saved_count, 1);
-    assert.equal(seedRotation(f.db), 1); assert.equal(h.bodies.length, 2);
-    assert.deepEqual(runStore(f.path).read(key)!.candidates, prepared);
-    assert.equal((await generateRecommendationBatch(key, dependencies, { saveOnly: true })).replayed, true);
-    assert.equal(seedRotation(f.db), 1); assert.equal(h.bodies.length, 2);
+    assert.equal((await generateRecommendationBatch('ilya', key, dependencies, { saveOnly: true })).saved_count, 1);
+    assert.equal(seedRotation(f.db, 'ilya'), 1); assert.equal(h.bodies.length, 2);
+    assert.deepEqual(runStore(f.path, 'ilya').read(key)!.candidates, prepared);
+    assert.equal((await generateRecommendationBatch('ilya', key, dependencies, { saveOnly: true })).replayed, true);
+    assert.equal(seedRotation(f.db, 'ilya'), 1); assert.equal(h.bodies.length, 2);
   } finally { f.cleanup(); }
 });
 
@@ -389,11 +389,11 @@ test('unchanged hard limits and shrinking preserve mandatory context without add
   assert.deepEqual(CANDIDATE_LIMITS, { llm: 30, tmdb: 25, seeds: 5, details: 55, results: 40, tmdb_requests: 120, input_bytes: 120000 });
   const f = contextFixture('large');
   try {
-    const full = buildRankingContext(f.db, f.candidates), small = buildRankingContext(f.db, f.candidates, 50000);
+    const full = buildRankingContext(f.db, 'ilya', f.candidates), small = buildRankingContext(f.db, 'ilya', f.candidates, 50000);
     assert.ok(small.summary.input_bytes <= 50000);
     assert.deepEqual(small.context.profile, full.context.profile); assert.deepEqual(small.context.rating_changes, full.context.rating_changes);
     assert.deepEqual(ids(small.context.candidates as MovieCandidate[]), ids(full.context.candidates as MovieCandidate[]));
-    assert.throws(() => buildRankingContext(f.db, f.candidates, 100), /limit/);
-    assert.equal(prepareTasteInputs(f.db).saved.profile_version, 1);
+    assert.throws(() => buildRankingContext(f.db, 'ilya', f.candidates, 100), /limit/);
+    assert.equal(prepareTasteInputs(f.db, 'ilya').saved.profile_version, 1);
   } finally { f.cleanup(); }
 });

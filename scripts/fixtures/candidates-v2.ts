@@ -8,7 +8,7 @@ export function candidatesFixture() {
     f.db.prepare(`INSERT INTO movies(id,title,release_year,tmdb_id,media_type,runtime_minutes,overview,genres_json,directors_json)
       VALUES(?,?,2000,?,'movie',100,'A confirmed story.',?,?)`).run(id, `History ${id}`, id + 10000,
       JSON.stringify(genres.map(id => ({ id, name: `Genre ${id}` }))), JSON.stringify(directors.map(id => ({ id, name: `Director ${id}` }))));
-    f.db.prepare('INSERT INTO user_movies(movie_id,watched,rating_100) VALUES(?,1,?)').run(id, rating);
+    f.db.prepare('INSERT INTO user_movies(user_id,movie_id,watched,rating_100) VALUES(\'ilya\',?,1,?)').run(id, rating);
   };
   // The old novelty sum favours many directors on four animation seeds.
   for (let i = 0; i < 4; i++) add(10 + i, 100, [16, 12], [400 + i * 10, 401 + i * 10, 402 + i * 10]);
@@ -25,7 +25,7 @@ export function candidatesFixture() {
     ...Array.from({ length: 24 }, (_, i) => candidate(1000 + i, 'llm', i < 20 ? [16, 12] : [901], i < 20 ? 400 : 9999)),
     ...Array.from({ length: 20 }, (_, i) => candidate(2000 + i, 'tmdb', i < 16 ? [1, 2] : [3 + (i - 16) * 2, 4 + (i - 16) * 2], i < 16 ? 10 : 100 + i - 16)),
   ];
-  const taste = buildTasteContext(f.db);
+  const taste = buildTasteContext(f.db, 'ilya');
   const profile = JSON.parse((f.db.prepare('SELECT profile_json FROM taste_profile').get() as { profile_json: string }).profile_json);
   f.db.prepare('UPDATE taste_profile SET profile_json=?').run(JSON.stringify({ ...profile, ratings_count: taste.snapshot.length, ratings_snapshot: taste.snapshot, context_fingerprint: taste.fingerprint }));
   const calls: string[] = [], bodies: Record<string, unknown>[] = [];

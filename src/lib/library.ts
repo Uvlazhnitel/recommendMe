@@ -1,9 +1,10 @@
+import { requireProfileSchema } from './profiles';
+import { personalScope, type UserId } from './profiles';
 import { observeOutcome } from './evaluation-storage';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type Database from 'better-sqlite3';
-import { migrateDatabase } from './migrations';
 import { backupForRecommendationWrite } from './recommendation-memory';
 
 export class LibraryError extends Error {
@@ -52,9 +53,10 @@ function summary(row: Row) {
 }
 function schema(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version !== 3 && version !== 4 && version !== 5 && version !== 6 && version !== 7) throw new Error('Library requires SQLite schema 3, 4, 5, 6 or 7.');
+  requireProfileSchema(db);
 }
-export function readLibrary(db: Database.Database, params = new URLSearchParams()) {
+export function readLibrary(db: Database.Database, userId: UserId, params = new URLSearchParams()) {
+  personalScope(db, userId);
   const query = parseLibraryQuery(params); schema(db);
   // Registering a connection-local SQL function does not modify the SQLite file.
   db.function('library_casefold', { deterministic: true }, (value: unknown) => typeof value === 'string' ? value.normalize('NFKC').toLowerCase() : '');
@@ -65,16 +67,17 @@ export function readLibrary(db: Database.Database, params = new URLSearchParams(
   }
   if (query.rated !== 'all') conditions.push(`u.rating_100 IS ${query.rated === 'true' ? 'NOT ' : ''}NULL`);
   if (query.year !== undefined) { conditions.push('coalesce(m.release_year,m.tmdb_release_year)=?'); values.push(query.year); }
-  const from = `FROM movies m JOIN user_movies u ON u.movie_id=m.id WHERE ${conditions.join(' AND ')}`;
+  const from = `FROM movies m JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId WHERE ${conditions.join(' AND ')}`;
   return db.transaction(() => {
-    const total = (db.prepare(`SELECT count(*) total ${from}`).get(...values) as { total: number }).total;
-    const rows = db.prepare(`SELECT ${columns(db)} ${from} ORDER BY ${sorts[query.sort]} LIMIT ? OFFSET ?`).all(...values, query.limit, (query.page - 1) * query.limit) as Row[];
+    const total = (db.prepare(`SELECT count(*) total ${from}`).get({userId}, ...values) as { total: number }).total;
+    const rows = db.prepare(`SELECT ${columns(db)} ${from} ORDER BY ${sorts[query.sort]} LIMIT ? OFFSET ?`).all({userId}, ...values, query.limit, (query.page - 1) * query.limit) as Row[];
     return { items: rows.map(summary), total, page: query.page, limit: query.limit, total_pages: Math.ceil(total / query.limit) };
   }).deferred();
 }
-export function readLibraryMovie(db: Database.Database, movieId: number) {
+export function readLibraryMovie(db: Database.Database, userId: UserId, movieId: number) {
+  personalScope(db, userId);
   localMovieId(movieId); schema(db);
-  const row = db.prepare(`SELECT ${columns(db)} FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id WHERE m.id=?`).get(movieId) as Row | undefined;
+  const row = db.prepare(`SELECT ${columns(db)} FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId WHERE m.id=?`).get({userId}, movieId) as Row | undefined;
   if (!row) throw new LibraryError('movie_not_found');
   return { ...summary(row), release_year: row.release_year, tmdb_release_year: row.tmdb_release_year, media_type: row.media_type,
     runtime_minutes: row.runtime_minutes, overview: row.overview, original_language: row.original_language, tmdb_vote_average: row.tmdb_vote_average,
@@ -85,31 +88,33 @@ export function ratingValue(value: unknown): number | null {
   if (value !== null && (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 100)) throw new LibraryError('invalid_rating');
   return value as number | null;
 }
-function watchedMovie(db: Database.Database, movieId: number) {
+function watchedMovie(db: Database.Database, userId: UserId, movieId: number) {
+  personalScope(db, userId);
   if (!db.prepare('SELECT 1 FROM movies WHERE id=?').get(movieId)) throw new LibraryError('movie_not_found');
-  const row = db.prepare('SELECT watched,rating_100,rating_source FROM user_movies WHERE movie_id=?').get(movieId) as
+  const row = db.prepare('SELECT watched,rating_100,rating_source FROM user_movies WHERE user_id=@userId AND movie_id=?').get({userId}, movieId) as
     { watched: number; rating_100: number | null; review_text?: string | null; rating_source: 'none' | 'manual' | 'letterboxd' } | undefined;
   if (!row || row.watched !== 1) throw new LibraryError('movie_not_watched');
   return row;
 }
-export async function updateLibraryRating(db: Database.Database, movieId: number, value: unknown,
+export async function updateLibraryRating(db: Database.Database, userId: UserId, movieId: number, value: unknown,
   options: { backup?: (db: Database.Database) => Promise<unknown> } = {}) {
+  personalScope(db, userId);
   localMovieId(movieId); const rating = ratingValue(value); schema(db);
   const result = (status: 'updated' | 'unchanged', source: 'none' | 'manual' | 'letterboxd') =>
     ({ status, movie_id: movieId, watched: true as const, rating_100: rating, rating_source: source });
-  const before = watchedMovie(db, movieId);
+  const before = watchedMovie(db, userId, movieId);
   if (before.rating_100 === rating) return result('unchanged', before.rating_source);
   await (options.backup ?? (async database => {
     const folder = join(dirname(database.name), 'backups'); mkdirSync(folder, { recursive: true });
     await backupForRecommendationWrite(database, join(folder, `before-rating-${randomUUID()}.sqlite`));
   }))(db);
-  migrateDatabase(db);
+  requireProfileSchema(db);
   return db.transaction(() => {
-    const row = watchedMovie(db, movieId);
+    const row = watchedMovie(db, userId, movieId);
     if (row.rating_100 === rating) return result('unchanged', row.rating_source);
     const source = rating === null ? 'none' : 'manual';
-    db.prepare('UPDATE user_movies SET rating_100=?,rating_source=? WHERE movie_id=?').run(rating, source, movieId);
-    observeOutcome(db, movieId, row, rating);
+    db.prepare('UPDATE user_movies SET rating_100=?,rating_source=? WHERE user_id=@userId AND movie_id=?').run({userId}, rating, source, movieId);
+    observeOutcome(db, userId, movieId, row, rating);
     return result('updated', source);
   }).immediate();
 }

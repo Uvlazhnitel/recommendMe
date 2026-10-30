@@ -1,3 +1,6 @@
+import { assertReportOwner } from './profiles';
+import { requireProfileSchema } from './profiles';
+import { personalScope, type UserId } from './profiles';
 import { reportPreferences, preferenceExclusion, parsePreferences } from './recommendation-preferences';
 import { saveEvaluation } from './evaluation-storage';
 import { createHash, randomUUID } from 'node:crypto';
@@ -6,7 +9,6 @@ import { dirname, resolve } from 'node:path';
 import type Database from 'better-sqlite3';
 import { blockedReason, readCandidateHistory } from './candidate-context';
 import { parseCandidateReport, validateRanking } from './recommendation-schema';
-import { migrateDatabase } from './migrations';
 import type { Evidence } from './taste-schema';
 
 export type RecordRequest = { tmdbIds: number[]; result?: never } | { result: unknown; tmdbIds?: never };
@@ -49,7 +51,10 @@ function savedRanking(value: unknown, now: number) {
   return { resultId, generatedAt, rows };
 }
 /** The caller creates a backup before writes. dryRun is the safe default; no network is used. */
-export function recordRecommendations(db: Database.Database, candidateReport: unknown, request: RecordRequest, options: { dryRun?: boolean; now?: number } = {}): SaveReport {
+export function recordRecommendations(db: Database.Database, userId: UserId, candidateReport: unknown, request: RecordRequest, options: { dryRun?: boolean; now?: number } = {}): SaveReport {
+  personalScope(db, userId);
+  assertReportOwner(candidateReport,userId);
+  if (request.result !== undefined) assertReportOwner(request.result,userId);
   const dryRun = options.dryRun ?? true, now = options.now ?? Date.now();
   const parsed = parseCandidateReport(candidateReport), candidates = new Map(parsed.candidates.map(row => [row.tmdb_id, row]));
   if (request.tmdbIds !== undefined && request.result !== undefined) throw new Error('Choose TMDB IDs or a saved ranking result, not both.');
@@ -71,11 +76,11 @@ export function recordRecommendations(db: Database.Database, candidateReport: un
   if (rows.some(row => !candidates.has(row.tmdb_id))) throw new Error('A requested TMDB ID is absent from the validated candidate file.');
   if (!dryRun) {
     if (db.readonly) throw new Error('Cannot record recommendations on a read-only database.');
-    migrateDatabase(db);
+    requireProfileSchema(db);
   }
   const operation = db.transaction((): SaveReport => {
     const version = db.pragma('user_version', { simple: true }) as number;
-    const previous = version >= 4 ? db.prepare(`SELECT m.tmdb_id,r.why_fit,r.possible_mismatch FROM recommendations r JOIN movies m ON m.id=r.movie_id WHERE r.result_id=?`).all(resultId) as
+    const previous = version >= 4 ? db.prepare(`SELECT m.tmdb_id,r.why_fit,r.possible_mismatch FROM recommendations r JOIN movies m ON m.id=r.movie_id WHERE r.user_id=@userId AND r.result_id=?`).all({userId}, resultId) as
       { tmdb_id: number; why_fit: string | null; possible_mismatch: string | null }[] : [];
     const report: SaveReport = { status: dryRun ? 'preview' : 'saved', result_id: resultId, saved_count: 0, already_saved_count: 0, would_save_count: 0, skipped: [] };
     if (previous.length) {
@@ -87,7 +92,7 @@ export function recordRecommendations(db: Database.Database, candidateReport: un
       report.skipped = rows.filter(row => !previous.some(saved => saved.tmdb_id === row.tmdb_id)).map(row => ({ tmdb_id: row.tmdb_id, reason: 'result_already_processed' }));
       return report;
     }
-    const history = readCandidateHistory(db), ratings = new Map(history.map(row => [row.id, row.rating_100]));
+    const history = readCandidateHistory(db, userId), ratings = new Map(history.map(row => [row.id, row.rating_100]));
     for (const row of rows) {
       const movie = candidates.get(row.tmdb_id)!;
       const reason = blockedReason({ id: movie.tmdb_id, title: movie.title, original_title: movie.original_title, year: movie.year }, history, now) || preferenceExclusion(movie, parsePreferences(preferences ?? undefined));
@@ -110,33 +115,35 @@ export function recordRecommendations(db: Database.Database, candidateReport: un
         db.prepare('UPDATE movies SET poster_path=coalesce(poster_path,?),backdrop_path=coalesce(backdrop_path,?) WHERE id=?')
           .run(movie.poster_path ?? null,movie.backdrop_path ?? null,movieId);
       }
-      db.prepare('INSERT INTO recommendations(movie_id,recommended_at,why_fit,possible_mismatch,result_id) VALUES(?,?,?,?,?)')
-        .run(movieId,recommendedAt,row.why_fit,row.possible_mismatch,resultId);
+      db.prepare('INSERT INTO recommendations(user_id,movie_id,recommended_at,why_fit,possible_mismatch,result_id) VALUES(@userId,?,?,?,?,?)')
+        .run({userId}, movieId,recommendedAt,row.why_fit,row.possible_mismatch,resultId);
       report.saved_count++;
     }
     if (!report.would_save_count) report.status = 'skipped';
-    if (!dryRun && !manual && report.saved_count) saveEvaluation(db, resultId, candidateReport, request.result);
+    if (!dryRun && !manual && report.saved_count) saveEvaluation(db, userId, resultId, candidateReport, request.result);
     return report;
   });
   return dryRun ? operation.deferred() : operation.immediate();
 }
-export function rejectRecommendation(db: Database.Database, tmdbId: number, undo = false) {
+export function rejectRecommendation(db: Database.Database, userId: UserId, tmdbId: number, undo = false) {
+  personalScope(db, userId);
   if (!positiveId(tmdbId)) throw new Error('TMDB ID must be a positive integer.');
   return db.transaction(() => {
     const movie = db.prepare('SELECT id FROM movies WHERE tmdb_id=?').get(tmdbId) as { id: number } | undefined;
     if (!movie) throw new Error('Movie is not in the local library. Record its verified candidate first; no TMDB request was made.');
     let personalChanges = 0, historyChanges = 0;
-    if (undo) personalChanges = db.prepare('UPDATE user_movies SET not_interested=0 WHERE movie_id=? AND not_interested=1').run(movie.id).changes;
+    if (undo) personalChanges = db.prepare('UPDATE user_movies SET not_interested=0 WHERE user_id=@userId AND movie_id=? AND not_interested=1').run({userId}, movie.id).changes;
     else {
-      personalChanges = db.prepare(`INSERT INTO user_movies(movie_id,not_interested) VALUES(?,1)
-        ON CONFLICT(movie_id) DO UPDATE SET not_interested=1 WHERE user_movies.not_interested<>1`).run(movie.id).changes;
-      historyChanges = db.prepare('UPDATE recommendations SET rejected=1 WHERE movie_id=? AND rejected=0').run(movie.id).changes;
+      personalChanges = db.prepare(`INSERT INTO user_movies(user_id,movie_id,not_interested) VALUES(@userId,?,1)
+        ON CONFLICT(user_id,movie_id) DO UPDATE SET not_interested=1 WHERE user_movies.not_interested<>1`).run({userId}, movie.id).changes;
+      historyChanges = db.prepare('UPDATE recommendations SET rejected=1 WHERE user_id=@userId AND movie_id=? AND rejected=0').run({userId}, movie.id).changes;
     }
     return { tmdb_id: tmdbId, not_interested: !undo, personal_changes: personalChanges, history_changes: historyChanges };
   }).immediate();
 }
-export function recommendationHistory(db: Database.Database) {
+export function recommendationHistory(db: Database.Database, userId: UserId) {
+  personalScope(db, userId);
   return db.prepare(`SELECT m.title,coalesce(m.release_year,m.tmdb_release_year) year,m.tmdb_id,r.recommended_at,r.rejected,
     coalesce(u.not_interested,0) not_interested,r.why_fit,r.possible_mismatch FROM recommendations r JOIN movies m ON m.id=r.movie_id
-    LEFT JOIN user_movies u ON u.movie_id=m.id ORDER BY r.recommended_at DESC,r.id DESC`).all();
+    LEFT JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId WHERE r.user_id=@userId ORDER BY r.recommended_at DESC,r.id DESC`).all({userId});
 }
