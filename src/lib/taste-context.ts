@@ -14,6 +14,10 @@ For every pattern give concise explanation, structured evidence IDs with their e
 For contrasts cite two different local movie IDs with a gap of at least 20, the confirmed similarity and a cautiously phrased possible difference; disclose that causes of ratings cannot be proven from metadata. If input contrast pairs exist, produce at least one contrast. Do not infer unprovided attributes for works that have only title/year/rating.
 Keep references in structured evidence fields. Do not supply movie URLs or invent titles, ratings, or IDs in prose. The application resolves display names from SQLite. Include explicit uncertainties, especially where few examples, missing metadata or contradictory ratings limit a conclusion.
 Aim for 4-6 positive and 4-6 negative patterns when supported, up to 12 contrasts, and concise uncertainties. Do not fill quotas with weak claims; missing evidence must remain uncertain. Return only the specified JSON schema.`;
+const HISTORICAL_PROFILE_INSTRUCTIONS = `Use historical_patterns for historical observations and the numeric pattern fields only for numeric evidence. Leave unsupported numeric patterns and contrasts empty; never invent ratings to fill them.
+For historical_patterns, these rules override the general instruction to include counterexamples within a pattern: EVERY evidence item in a positive pattern must have sentiment liked; EVERY evidence item in a negative pattern must have sentiment disliked; EVERY evidence item in a mixed pattern must have sentiment mixed. One matching item does not allow other sentiments in that pattern.
+The kind mixed refers only to works explicitly marked mixed in the supplied history. It never means combining liked and disliked works, uncertainty about a theme, or selective interest in a genre. If no supplied work has sentiment mixed, omit mixed patterns.
+Keep counterexamples in separate supported patterns of their own kind. Explain the limitation in uncertainty without putting opposite or mixed sentiments into a positive/negative pattern's evidence. Copy each supplied historical reference exactly; never relabel its sentiment to fit a pattern. Before returning, check every evidence item against its pattern kind.`;
 type Row = { media_type?:string; movie_id: number; title: string; year: number | null; rating_100: number; tmdb_id: number | null;
   overview: string | null; genres_json: string | null; directors_json: string | null; runtime_minutes: number | null };
 type Person = { id: number; name: string };
@@ -96,7 +100,7 @@ export function buildTasteContext(database: Database.Database, userId: UserId, m
   const historicalSnapshot=historicalEvidence(database,userId);
   const historicalRows=historicalSnapshot.map(ref=>{const row=database.prepare('SELECT id movie_id,title,release_year year,media_type,tmdb_id,overview,genres_json,directors_json,runtime_minutes FROM movies WHERE id=?').get(ref.movie_id) as Row;return {...ref,title:row.title,year:row.year,media_type:row.media_type,details:metadata(row)};});
   const format=historicalSnapshot.length?HISTORICAL_PROFILE_FORMAT:PROFILE_FORMAT;
-  const prompt=TASTE_SYSTEM_PROMPT+(historicalSnapshot.length?'\n'+HISTORICAL_GUIDANCE+' Use historical_patterns for historical observations and the numeric pattern fields only for numeric evidence. Leave unsupported numeric patterns and contrasts empty; never invent ratings to fill them.':'');
+  const prompt=TASTE_SYSTEM_PROMPT+(historicalSnapshot.length?'\n'+HISTORICAL_GUIDANCE+'\n'+HISTORICAL_PROFILE_INSTRUCTIONS:'');
   if (!rows.length && !historicalSnapshot.length) throw new Error('No rated works are available for taste analysis.');
   const ratings: Rated[] = rows.map(({ movie_id, title, year, rating_100 }) => ({ movie_id, title, year, rating_100 }));
   const snapshot: Evidence[] = ratings.map(({ movie_id, rating_100 }) => ({ movie_id, rating_100 }));

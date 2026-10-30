@@ -36,6 +36,33 @@ test('historical-only profile and two-stage generation use typed current evidenc
  assert.deepEqual(f.db.prepare("SELECT profile_json FROM taste_profile WHERE user_id='ilya'").get(),ilya);assert.equal(recommendationState('valeriy',{open:f.open,config}).generation.state,'saved');
  const recommended=result.batch!.movies[0];await confirmMovieWatch(f.db,'valeriy',{movie_id:recommended.movie_id,watched:true,rating_100:0},noBackup);assert.equal(evaluationReport(f.db,'valeriy').total.mean_rating,0);assert.equal(evaluationReport(f.db,'ilya').total.observed,0);
  }finally{f.cleanup();}});
+test('historical profile rejects cross-polarity counterexamples before saving, without retry',async()=>{
+ const cases=[['positive',['liked','disliked']],['positive',['liked','mixed']],['negative',['disliked','liked']],['negative',['disliked','mixed']],['mixed',['liked','disliked']],['mixed',['mixed','liked']]] as const;
+ for(const [kind,sentiments]of cases){
+  const f=fixture();try{
+   await prepared(f);const payload=await profileResponse().json();const body=JSON.parse(payload.output[0].content[0].text);
+   const evidence=historicalEvidence(f.db,'valeriy');
+   body.historical_patterns.push({kind,summary:'A pattern with a counterexample.',explanation:'Different source sentiments remain different.',uncertainty:'Causes are unknown.',evidence:sentiments.map(sentiment=>evidence.find(e=>e.sentiment===sentiment)!)});
+   payload.output[0].content[0].text=JSON.stringify(body);
+   const before=f.db.serialize();let calls=0;
+   await assert.rejects(generateTasteProfile(f.db,'valeriy',{live:true,...config(),backupPath:join(f.dir,'before-profile.sqlite'),fetch:async()=>{calls++;return Response.json(payload);}}),/Historical pattern (has wrong polarity|cannot turn mixed or opposing feedback into one pole)/,kind+': '+sentiments.join('/'));
+   assert.equal(calls,1);assert.equal(readTasteProfile(f.db,'valeriy'),null);assert.deepEqual(f.db.serialize(),before);
+   assert.ok(!readdirSync(f.dir).some(name=>name.endsWith('.lock')));
+  }finally{f.cleanup();}
+ }
+});
+test('separate positive, negative and literal mixed historical patterns save without numeric ratings',async()=>{
+ const f=fixture();try{
+  await prepared(f);const payload=await profileResponse().json();const body=JSON.parse(payload.output[0].content[0].text);
+  body.historical_patterns.push({kind:'mixed',summary:'An explicitly mixed source observation.',explanation:'This work was marked mixed.',uncertainty:'A mixed mark does not reveal its cause.',evidence:[historicalEvidence(f.db,'valeriy').find(e=>e.sentiment==='mixed')!]});
+  payload.output[0].content[0].text=JSON.stringify(body);
+  const ilya=f.db.prepare("SELECT * FROM taste_profile WHERE user_id='ilya'").all();let calls=0;
+  await generateTasteProfile(f.db,'valeriy',{live:true,...config(),backupPath:join(f.dir,'before-profile.sqlite'),fetch:async()=>{calls++;return Response.json(payload);}});
+  const saved=readTasteProfile(f.db,'valeriy')!;assert.equal(saved.schema_version,2);assert.equal(saved.ratings_count,0);assert.deepEqual(saved.ratings_snapshot,[]);assert.deepEqual(saved.historical_patterns,body.historical_patterns);
+  assert.equal((f.db.prepare("SELECT count(*) n FROM user_movies WHERE user_id='valeriy' AND rating_100 IS NOT NULL").get() as {n:number}).n,0);
+  assert.deepEqual(f.db.prepare("SELECT * FROM taste_profile WHERE user_id='ilya'").all(),ilya);assert.equal(calls,1);
+ }finally{f.cleanup();}
+});
 test('watchlist is independent, owner-specific and survives backup/restore with source decisions',async()=>{const f=fixture();try{await prepared(f);await setWatchlist(f.db,'valeriy',3,true,async()=>{});assert.equal(readLibrary(f.db,'valeriy',new URLSearchParams('watchlist=true')).total,2);assert.equal(readLibrary(f.db,'ilya',new URLSearchParams('watchlist=true')).total,0);await setWatchlist(f.db,'valeriy',3,false,async()=>{});assert.equal(readLibraryMovie(f.db,'valeriy',3).watched,true);const backup=await backupDatabase(f.path,join(f.dir,'backups'));const target=join(f.dir,'restore','movies.sqlite');restoreBackup(backup,target,{relocateFrom:await import('node:fs').then(fs=>fs.realpathSync(f.path))});const restored=new Database(target,{readonly:true});try{for(const t of ['legacy_identity_decisions','personal_rating_history','legacy_movie_marks'])assert.deepEqual(restored.prepare('SELECT * FROM '+t+' ORDER BY 1,2').all(),f.db.prepare('SELECT * FROM '+t+' ORDER BY 1,2').all());}finally{restored.close();}}finally{f.cleanup();}});
 
 test('manual numeric conflicts stop duplicate mapping and SQL failure rolls back all remaps',async()=>{
