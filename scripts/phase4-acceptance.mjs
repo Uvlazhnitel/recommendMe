@@ -86,7 +86,15 @@ async function chooseIlya(target) {
   await target.getByRole('button',{name:'Сменить профиль: Илья'}).waitFor();
 }
 async function state() { const r=await http.get(base+'/api/recommendations');assert.equal(r.status(),200);return r.json(); }
-async function go(path) { await page.goto(base+path);await page.waitForLoadState('networkidle'); }
+// AppShell can prefetch routes after the access/profile checks. Each scenario
+// waits for its own visible state instead of waiting for background network idle.
+async function go(path) {
+  await page.goto(base+path);
+  if (new URL(base+path).pathname === '/') {
+    await page.locator('.profile-chooser, .home-v2').first().waitFor();
+    if (await page.locator('.home-v2').count()) await page.locator('.home-v2 .loading-state').waitFor({state:'hidden'});
+  }
+}
 async function libraryReady() { await page.locator('.library-results[aria-busy="false"]').waitFor(); }
 async function screenshot(name, fullPage=false) {
   await page.evaluate(()=>document.fonts.ready);
@@ -166,7 +174,7 @@ try {
   check('gallery5 all widths, saved wishes distinct from draft, full explanations, modal Escape/focus');
   await screenshot('recommendations-desktop');
   const mobileCapture=await browser.newContext({viewport:{width:375,height:1000}}),mobilePage=await mobileCapture.newPage();
-  await mobilePage.goto(base+'/');await mobilePage.waitForLoadState('networkidle');await chooseIlya(mobilePage);await mobilePage.evaluate(()=>document.fonts.ready);await mobilePage.screenshot({path:join(output,'recommendations-mobile.png')});await mobileCapture.close();await openMovie(first.batch.movies[1].title);await page.keyboard.press('Escape');assert.equal(openaiCalls(),2);
+  await mobilePage.goto(base+'/');await chooseIlya(mobilePage);await mobilePage.evaluate(()=>document.fonts.ready);await mobilePage.screenshot({path:join(output,'recommendations-mobile.png')});await mobileCapture.close();await openMovie(first.batch.movies[1].title);await page.keyboard.press('Escape');assert.equal(openaiCalls(),2);
   const replay=await http.post(base+'/api/recommendations/generate',{data:firstRequest});assert.equal(replay.status(),200);assert.equal(openaiCalls(),2);check('two mocked OpenAI stages; double click/concurrent POST/reload/replay never pay again');
   const rejection=first.batch.movies[4];await openMovie(rejection.title);await page.getByRole('button',{name:'Неинтересно',exact:true}).click();
   await until(async()=> (await state()).batch.movies.length===4,'rejection removes active film');
