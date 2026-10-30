@@ -61,7 +61,7 @@ export default function RecommendationScreen() {
       const value = await request<{ batch: RecommendationBatch | null }>(`/api/recommendations/generate${saveOnly ? '?save_only=1' : ''}`, json({ request_id: requestId, confirmed: true, ...(!saveOnly ? { preferences: snapshot } : {}) }));
       if (mounted.current) {
         setData(current => current ? { ...current, batch: value.batch } : current);
-        setNotice(saveOnly ? 'Подборка сохранена. Новых запросов AI не было.' : 'Новая подборка сохранена.');
+        setNotice(saveOnly ? 'Подборка сохранена. Новых запросов к модели не было.' : 'Новая подборка сохранена.');
       }
     } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Подбор не завершён.'); }
     finally {
@@ -105,7 +105,7 @@ export default function RecommendationScreen() {
     {readinessMessage ? <p className="readiness-notice">{readinessMessage}</p> : null}
     {!error && data?.generation.state === 'failed' ? <p className="readiness-notice" role="status">Последняя попытка подбора завершилась ошибкой. Предыдущая подборка сохранена. Новый платный запуск требует отдельного подтверждения.</p> : null}
     {blocked ? <p className="readiness-notice" role="status">Предыдущий подбор не завершился. Нужно проверить процесс сервера и оставшуюся блокировку; автоматического повтора не будет.</p> : null}
-    {data?.generation.recoverable_save && data.generation.request_id ? <Button tone="light" disabled={busy || acting} onClick={() => { void start(data.generation.request_id!, true); }}>Повторить сохранение без AI</Button> : null}
+    {data?.generation.recoverable_save && data.generation.request_id ? <Button tone="light" disabled={busy || acting} onClick={() => { void start(data.generation.request_id!, true); }}>Повторить сохранение без нового подбора</Button> : null}
     {error && !busy ? <Button tone="quiet" disabled={acting} onClick={() => { setError(''); void refresh(); }}>Проверить состояние</Button> : null}
     {notice ? <div className="recommendation-notice" role="status"><p>{notice}</p>{undoId !== null ? <Button tone="quiet" disabled={acting || busy} onClick={() => { void reject(undoId, true); }}>Отменить</Button> : null}</div> : null}
     {!initialLoading ? <HomeGallery batch={data?.batch ?? null} error={error} busy={busy || acting} onWatch={watch} onReject={movie => reject(movie.tmdb_id)} /> : null}

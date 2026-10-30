@@ -1,3 +1,4 @@
+import { beforeRussianLanguage } from './fixtures/before-russian-language';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -294,9 +295,9 @@ for (const name of contextScenarios) test(`unchanged Taste Context wire bytes/ha
     const before = readFileSync(f.path); f.db.pragma('query_only=ON');
     const c = buildCandidateContext(f.db, 'ilya'), r = buildRankingContext(f.db, 'ilya', f.candidates);
     assert.deepEqual(measure(c.input, CANDIDATE_FORMAT), baseline.scenarios[name].candidate);
-    assert.deepEqual(measure(r.input, r.format), baseline.scenarios[name].ranking);
+    assert.deepEqual(measure(beforeRussianLanguage(r.input), r.format), baseline.scenarios[name].ranking);
     assert.equal(wireBytes(c.input, CANDIDATE_FORMAT), baseline.scenarios[name].candidate.bytes + wireOverhead);
-    assert.equal(wireBytes(r.input, r.format), baseline.scenarios[name].ranking.bytes + wireOverhead);
+    assert.equal(wireBytes(beforeRussianLanguage(r.input), r.format), baseline.scenarios[name].ranking.bytes + wireOverhead);
     assert.deepEqual(readFileSync(f.path), before);
   } finally { f.cleanup(); }
 });
@@ -341,7 +342,7 @@ test('legacy candidate reports remain readable and selector diagnostics do not a
     const report = { ...old, selection: selection(old.candidates).selection };
     assert.deepEqual(parseCandidateReport(old), parseCandidateReport(report));
     const r = buildRankingContext(f.db, 'ilya', old.candidates);
-    assert.deepEqual(measure(r.input, r.format), baseline.audit44.ranking);
+    assert.deepEqual(measure(beforeRussianLanguage(r.input), r.format), baseline.audit44.ranking);
     assert.deepEqual(measure(buildCandidateContext(f.db, 'ilya').input, CANDIDATE_FORMAT), baseline.audit44.candidate);
   } finally { f.cleanup(); }
 });

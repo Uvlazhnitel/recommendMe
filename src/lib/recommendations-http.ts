@@ -1,3 +1,6 @@
+import { openDatabase } from './db';
+import { readRecommendationBatch } from './recommendation-batches';
+import { warmRussianMovies } from './russian-metadata';
 import { profileRoute } from './profile-http';
 import { ProfileError, type UserId } from './profiles';
 import { parsePreferences, type RecommendationPreferences } from './recommendation-preferences';
@@ -20,16 +23,21 @@ const messages: Record<string, string> = {
   no_candidates: 'Нет подходящих кандидатов с выбранными пожеланиями. Длительность, запреты, просмотры и ограничения повторов не ослаблялись.',
   ranking_failed: 'Финальный отбор не завершён. Предыдущая подборка сохранена; автоматического повтора нет.',
   generation_timeout: 'Время ожидания подбора истекло. Отправленные запросы могли быть оплачены; автоматического повтора нет.',
-  save_failed: 'Не удалось сохранить новую подборку. Предыдущая доступна; можно повторить только сохранение без AI.',
-  saved_result_unavailable: 'Подготовленный результат не найден. Повтор сохранения не запускает AI.',
-  no_eligible_recommendations: 'Фильмы стали недоступны до сохранения. Новых запросов AI не выполнялось.',
+  save_failed: 'Не удалось сохранить новую подборку. Предыдущая доступна; можно повторить только сохранение без повторного обращения к модели.',
+  saved_result_unavailable: 'Подготовленный результат не найден. Повтор сохранения не запускает подбор.',
+  no_eligible_recommendations: 'Фильмы стали недоступны до сохранения. Новых запросов к модели не выполнялось.',
   generation_state_unavailable: 'Не удалось прочитать состояние подбора. Проверьте сервер; новый платный запуск не выполнялся.',
   generation_unavailable: 'Подбор не завершён. Предыдущая подборка сохранена. Проверьте состояние перед новым платным запуском.',
 };
 export function recommendationHandlers(dependencies: RecommendationDependencies = {}) {
   const handlers = {
     async get(request: Request, userId: UserId) {
-      try { if (request) assertWriteOrigin(request); return reply(recommendationState(userId, dependencies)); }
+      try { if (request) assertWriteOrigin(request); let result = recommendationState(userId, dependencies);
+        if (!dependencies.open) {
+          await warmRussianMovies([...(result.batch?.movies.map(row => row.movie_id) ?? []), ...result.home.favorites.map(row => row.movie_id)]);
+          result = recommendationState(userId, dependencies);
+        }
+        return reply(result); }
       catch (error) { if (error instanceof ProfileError) throw error; return reply({ error: error instanceof JsonInputError ? error.code : 'recommendations_unavailable', message: 'Не удалось прочитать сохранённую подборку.' }, error instanceof JsonInputError ? error.status : 503); }
     },
     async generate(request: Request, userId: UserId) {
@@ -48,6 +56,13 @@ export function recommendationHandlers(dependencies: RecommendationDependencies 
       } catch (error) { if (error instanceof ProfileError) throw error; return reply({ error: error instanceof JsonInputError ? error.code : 'invalid_request', message: 'Проверьте подтверждение и идентификатор запроса.' }, error instanceof JsonInputError ? error.status : 400); }
       try {
         const result = await generateRecommendationBatch(userId, requestId, dependencies, { saveOnly: new URL(request.url).searchParams.get('save_only') === '1', preferences });
+        if (!dependencies.open) {
+          await warmRussianMovies(result.batch?.movies.map(row => row.movie_id) ?? []);
+          if (result.batch) {
+            const db = openDatabase({ readonly: true });
+            try { result.batch = readRecommendationBatch(db, userId, result.batch.result_id); } finally { db.close(); }
+          }
+        }
         return reply(result, result.replayed ? 200 : 201);
       } catch (error) { if (error instanceof ProfileError) throw error;
         const failure = error instanceof GenerationError ? error : new GenerationError('generation_unavailable');

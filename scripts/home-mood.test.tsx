@@ -1,3 +1,4 @@
+import { beforeRussianLanguage } from './fixtures/before-russian-language';
 import { profileRequest } from './fixtures/profile-request';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -42,7 +43,7 @@ for (const bad of [null,[],{},wishes({mood:'fake' as never}),wishes({max_runtime
 test('surprise full serialized input+format exactly matches pre-change baseline and seeds',()=>{
   const f=candidatesFixture();try{
     const a=buildCandidateContext(f.db, 'ilya',undefined,wishes()),b=buildRankingContext(f.db, 'ilya',f.candidates.slice(0,40),undefined,wishes());
-    for(const[name,c]of[['candidates',{...a,format:CANDIDATE_FORMAT}],['ranking',b]] as const){const s=serialize(c);assert.equal(Buffer.byteLength(s),baseline[name].bytes);assert.equal(createHash('sha256').update(s).digest('hex'),baseline[name].sha256);}
+    for(const[name,c]of[['candidates',{...a,format:CANDIDATE_FORMAT}],['ranking',b]] as const){const s=serialize({...c,input:beforeRussianLanguage(c.input) as typeof c.input});assert.equal(Buffer.byteLength(s),baseline[name].bytes);assert.equal(createHash('sha256').update(s).digest('hex'),baseline[name].sha256);}
     assert.deepEqual(a.seeds,buildCandidateContext(f.db, 'ilya').seeds);assert.equal(customPreferences(wishes()),false);
   }finally{f.cleanup();}
 });

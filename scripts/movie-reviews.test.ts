@@ -77,12 +77,12 @@ test('reviews on explicitly migrated schema8 back up data first; reads stay read
     assert.deepEqual(readFileSync(f.path), before);
     let backedUp = false;
     await updateMovieReview(f.db, 'ilya', 1, 'Text', { backup: async db => {
-      assert.equal(db.pragma('user_version', { simple: true }), 10); backedUp = true;
+      assert.equal(db.pragma('user_version', { simple: true }), 11); backedUp = true;
       await db.backup(f.dir + '/legacy.sqlite');
     } });
     assert.ok(backedUp); assert.equal(f.db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     const backup = new Database(f.dir + '/legacy.sqlite', { readonly: true });
-    try { assert.equal(backup.pragma('user_version', { simple: true }), 10); assert.equal(readLibraryMovie(backup, 'ilya', 1).review_text, null); } finally { backup.close(); }
+    try { assert.equal(backup.pragma('user_version', { simple: true }), 11); assert.equal(readLibraryMovie(backup, 'ilya', 1).review_text, null); } finally { backup.close(); }
     const saved = row(f.db);
     f.db.exec("CREATE TRIGGER fail_review BEFORE UPDATE OF review_text ON user_movies BEGIN SELECT RAISE(ABORT,'forced'); END");
     await assert.rejects(updateMovieReview(f.db, 'ilya', 1, 'Other')); assert.deepEqual(row(f.db), saved);

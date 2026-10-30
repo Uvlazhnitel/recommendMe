@@ -10,7 +10,7 @@ export function userId(value: unknown): UserId {
   return value;
 }
 export function requireProfileSchema(db: Database.Database) {
-  if (![8, 9, 10].includes(db.pragma('user_version', { simple: true }) as number)) throw new ProfileError('schema_upgrade_required', 503);
+  if (![8, 9, 10, 11].includes(db.pragma('user_version', { simple: true }) as number)) throw new ProfileError('schema_upgrade_required', 503);
   return 8;
 }
 export function personalScope(db: Database.Database, value: unknown): asserts value is UserId { userId(value); requireProfileSchema(db); }

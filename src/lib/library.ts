@@ -1,3 +1,4 @@
+import { hasRussianCache, russianMovie, russianGenres } from './russian-presentation';
 import { legacyMovieInfo } from './legacy-marks';
 import { requireProfileSchema } from './profiles';
 import { personalScope, type UserId } from './profiles';
@@ -46,9 +47,12 @@ type Row = {
 const columns = (db: Database.Database) => `${(db.pragma('user_version',{simple:true}) as number)>=9?'coalesce(u.watchlist,0) AS watchlist,':''}${(db.pragma('user_version', { simple: true }) as number) >= 6 ? 'u.review_text' : 'NULL AS review_text'},m.*,u.watched,u.rating_100,u.rating_source,u.not_interested,u.original_rating_stars,
   u.letterboxd_date,u.letterboxd_rating_date,u.watched_at,u.created_at,u.updated_at`;
 const decode = (value: string | null): unknown => value === null ? null : JSON.parse(value);
-function summary(row: Row) {
-  return { ...(row.watchlist==null?{}:{watchlist:row.watchlist===1}),movie_id: row.id, tmdb_id: row.tmdb_id, title: row.title, tmdb_title: row.tmdb_title, original_title: row.original_title,
-    year: row.release_year ?? row.tmdb_release_year, poster_path: row.poster_path, genres: decode(row.genres_json), directors: decode(row.directors_json),
+function summary(row: Row, db: Database.Database) {
+  const localized = russianMovie(db, row.tmdb_id);
+  const sourceGenres = decode(row.genres_json) as { id: number; name: string }[] | null;
+  const displayGenres = hasRussianCache(db) && sourceGenres ? russianGenres(sourceGenres) : sourceGenres;
+  return { ...(row.watchlist==null?{}:{watchlist:row.watchlist===1}),movie_id: row.id, tmdb_id: row.tmdb_id, title: localized?.title ?? row.title, tmdb_title: localized?.title ?? row.tmdb_title, original_title: row.original_title,
+    year: row.release_year ?? row.tmdb_release_year, poster_path: row.poster_path, genres: displayGenres, directors: decode(row.directors_json),
     watched: row.watched === 1, rating_100: row.rating_100, review_text: row.review_text ?? null, rating_source: row.rating_source ?? 'none', not_interested: row.not_interested === 1,
     letterboxd_uri: row.letterboxd_uri, original_rating_stars: row.original_rating_stars, letterboxd_date: row.letterboxd_date,
     letterboxd_rating_date: row.letterboxd_rating_date, watched_at: row.watched_at, created_at: row.created_at, updated_at: row.updated_at };
@@ -70,11 +74,15 @@ export function readLibrary(db: Database.Database, userId: UserId, params = new 
   }
   if (query.rated !== 'all') conditions.push(`u.rating_100 IS ${query.rated === 'true' ? 'NOT ' : ''}NULL`);
   if (query.year !== undefined) { conditions.push('coalesce(m.release_year,m.tmdb_release_year)=?'); values.push(query.year); }
+  if (query.q && hasRussianCache(db)) {
+    conditions[1] = conditions[1].slice(0, -1) + ' OR EXISTS(SELECT 1 FROM ru_movie_metadata ru WHERE ru.tmdb_id=m.tmdb_id AND instr(library_casefold(ru.title),?)>0))';
+    values.splice(3, 0, query.q.normalize('NFKC').toLowerCase());
+  }
   const from = `FROM movies m JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId WHERE ${conditions.join(' AND ')}`;
   return db.transaction(() => {
     const total = (db.prepare(`SELECT count(*) total ${from}`).get({userId}, ...values) as { total: number }).total;
     const rows = db.prepare(`SELECT ${columns(db)} ${from} ORDER BY ${sorts[query.sort]} LIMIT ? OFFSET ?`).all({userId}, ...values, query.limit, (query.page - 1) * query.limit) as Row[];
-    return { items: rows.map(summary), total, page: query.page, limit: query.limit, total_pages: Math.ceil(total / query.limit) };
+    return { items: rows.map(row => summary(row, db)), total, page: query.page, limit: query.limit, total_pages: Math.ceil(total / query.limit) };
   }).deferred();
 }
 export function readLibraryMovie(db: Database.Database, userId: UserId, movieId: number) {
@@ -82,8 +90,8 @@ export function readLibraryMovie(db: Database.Database, userId: UserId, movieId:
   localMovieId(movieId); schema(db);
   const row = db.prepare(`SELECT ${columns(db)} FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId WHERE m.id=?`).get({userId}, movieId) as Row | undefined;
   if (!row) throw new LibraryError('movie_not_found');
-  return { ...summary(row), ...legacyMovieInfo(db,userId,movieId), release_year: row.release_year, tmdb_release_year: row.tmdb_release_year, media_type: row.media_type,
-    runtime_minutes: row.runtime_minutes, overview: row.overview, original_language: row.original_language, tmdb_vote_average: row.tmdb_vote_average,
+  return { ...summary(row, db), ...legacyMovieInfo(db,userId,movieId), release_year: row.release_year, tmdb_release_year: row.tmdb_release_year, media_type: row.media_type,
+    runtime_minutes: row.runtime_minutes, overview: hasRussianCache(db) ? russianMovie(db, row.tmdb_id)?.overview ?? 'Описание на русском пока отсутствует.' : row.overview, original_language: row.original_language, tmdb_vote_average: row.tmdb_vote_average,
     tmdb_vote_count: row.tmdb_vote_count, tmdb_popularity: row.tmdb_popularity, credits: decode(row.credits_json), metadata_updated_at: row.metadata_updated_at,
     tmdb_enrichment_status: row.tmdb_enrichment_status, tmdb_attempted_at: row.tmdb_attempted_at };
 }

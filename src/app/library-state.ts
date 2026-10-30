@@ -19,7 +19,7 @@ export function parseLibraryState(params: URLSearchParams): { state: LibraryStat
     !Number.isSafeInteger(Number(page)) || !Number.isSafeInteger((Number(page) - 1) * 25)) return invalid();
   Object.assign(state, { q, rated, sort, year, page: Number(page) });
   const selection = parseRateSelection(params.has('movie_id') ? params.get('movie_id')! : undefined);
-  if (selection.error) return { state, error: 'Некорректный ID фильма. Вернитесь к библиотеке.' };
+  if (selection.error) return { state, error: 'Некорректный идентификатор фильма. Вернитесь к библиотеке.' };
   return { state, movieId: selection.movieId };
 }
 export function libraryParams(state: LibraryState) {

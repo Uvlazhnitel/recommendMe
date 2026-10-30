@@ -148,10 +148,18 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
       if (!Array.isArray(body.results) || body.results.length > 20) throw new TmdbError('Invalid TMDB recommendations response.');
       return [...new Map(body.results.map(row => { const parsed = candidate(row); return [parsed.id, parsed] as const; })).values()];
     },
+    async presentation(movieId: number) {
+      id(movieId);
+      const raw = object(await request(`/movie/${movieId}`, {}, 'ru-RU'));
+      if (id(raw.id) !== movieId || (raw.media_type !== undefined && raw.media_type !== 'movie')) throw new TmdbError('Invalid movie presentation identity.');
+      const localizedTitle = string(raw.title), overview = string(raw.overview);
+      return { title: localizedTitle && /[А-Яа-яЁё]/u.test(localizedTitle) ? localizedTitle : string(raw.original_title) ?? title(raw.title),
+        overview: overview && /[А-Яа-яЁё]/u.test(overview) ? overview : null };
+    },
     async searchInteractive(query: string, releaseYear?: number) {
       const params: Record<string, string> = { query, page: '1', include_adult: 'true' };
       if (releaseYear !== undefined) params.year = String(releaseYear);
-      const body = object(await request('/search/movie', params));
+      const body = object(await request('/search/movie', params, 'ru-RU'));
       const pages = number(body.total_pages, true);
       if (pages === null || !Array.isArray(body.results) || body.results.length > 20) throw new TmdbError('Invalid TMDB search response.');
       const results = new Map<number, Candidate & { poster_path: string | null }>();

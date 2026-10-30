@@ -104,7 +104,7 @@ test('details read catalog-only movies without creating personal rows and preser
   const f = fixture(); try {
     const before = all(f.db); const row = readLibraryMovie(f.db, 'ilya', 13);
     assert.equal(row.watched, false); assert.equal(row.rating_100, null); assert.equal(row.rating_source, 'none'); assert.equal(row.created_at, null);
-    assert.equal(row.poster_path, null); assert.equal(row.credits, null); assert.deepEqual(row.genres, [{ id: 1, name: 'Drama' }]);
+    assert.equal(row.poster_path, null); assert.equal(row.credits, null); assert.deepEqual(row.genres, [{ id: 1, name: 'Другой жанр' }]);
     const imported = readLibraryMovie(f.db, 'ilya', 2); assert.equal(imported.original_rating_stars, 3); assert.equal(imported.letterboxd_rating_date, '2020-01-02');
     assert.equal(imported.watched_at, null); assert.equal(all(f.db), before);
     assert.throws(() => readLibraryMovie(f.db, 'ilya', 999), expectCode('movie_not_found'));

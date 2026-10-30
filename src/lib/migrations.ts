@@ -12,6 +12,7 @@ const migrations = [
   new URL('../../migrations/008_profiles.sql', import.meta.url),
   new URL('../../migrations/009_legacy_marks.sql', import.meta.url),
   new URL('../../migrations/010_legacy_identity.sql', import.meta.url),
+  new URL('../../migrations/011_russian_presentation.sql', import.meta.url),
 ];
 
 export const SCHEMA_VERSION = migrations.length;

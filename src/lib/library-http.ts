@@ -1,3 +1,4 @@
+import { warmRussianMovies } from './russian-metadata';
 import { profileRoute } from './profile-http';
 import { ProfileError, type UserId } from './profiles';
 import { openDatabase } from './db';
@@ -9,7 +10,7 @@ function failure(error: unknown) {
   if (error instanceof ProfileError) throw error;
   if (error instanceof JsonInputError) return reply({ error: error.code }, error.status);
   if (error instanceof LibraryError) return reply({ error: error.code }, error.code === 'movie_not_found' ? 404 : error.code === 'movie_not_watched' ? 409 : 400);
-  return reply({ error: 'library_unavailable', message: 'The local library could not complete the operation.' }, 500);
+  return reply({ error: 'library_unavailable', message: 'Не удалось выполнить операцию с библиотекой.' }, 500);
 }
 type Context = { params: Promise<{ id: string }> };
 async function routeId(context: Context) {
@@ -24,7 +25,9 @@ export function libraryHandlers(dependencies: { open?: typeof openDatabase; back
       try {
         const params = new URL(request.url).searchParams; parseLibraryQuery(params);
         db = (dependencies.open ?? openDatabase)({ readonly: true });
-        return reply(readLibrary(db, userId, params));
+        const result = readLibrary(db, userId, params);
+        if (!dependencies.open) { await warmRussianMovies(result.items.map(row => row.movie_id)); return reply(readLibrary(db, userId, params)); }
+        return reply(result);
       } catch (error) { if (error instanceof ProfileError) throw error; return failure(error); }
       finally { db?.close(); }
     },
@@ -33,6 +36,7 @@ export function libraryHandlers(dependencies: { open?: typeof openDatabase; back
       try {
         const id = await routeId(context);
         db = (dependencies.open ?? openDatabase)({ readonly: true });
+        if (!dependencies.open) await warmRussianMovies([id]);
         return reply(readLibraryMovie(db, userId, id));
       } catch (error) { if (error instanceof ProfileError) throw error; return failure(error); }
       finally { db?.close(); }

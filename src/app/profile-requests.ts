@@ -20,12 +20,12 @@ export async function profileFetch(url:string,init:RequestInit={}) {
   const callerSignal=init.signal;
   const abortFromCaller=()=>controller.abort(callerSignal?.reason);
   if(reading){current.reads.add(controller);if(callerSignal?.aborted)abortFromCaller();else callerSignal?.addEventListener('abort',abortFromCaller,{once:true});}
-  const checkCurrent=()=>{if(current.epoch!==epoch)throw new DOMException('Profile changed','AbortError');if(reading&&controller.signal.aborted)throw controller.signal.reason ?? new DOMException('Aborted','AbortError');};
+  const checkCurrent=()=>{if(current.epoch!==epoch)throw new DOMException('Профиль изменён.','AbortError');if(reading&&controller.signal.aborted)throw controller.signal.reason ?? new DOMException('Запрос отменён.','AbortError');};
   try {
     const response=await accessFetch(url,{...init,headers,...(reading?{signal:controller.signal}:{})});
     checkCurrent();
     if(!response.ok){const body=await response.clone().json().catch(()=>null);checkCurrent();if(['profile_changed','profile_required','invalid_profile'].includes(body?.error)){
-      applyBrowserProfile(null);window.dispatchEvent(new Event('recommendme-profile-invalid'));throw new DOMException('Profile changed','AbortError');
+      applyBrowserProfile(null);window.dispatchEvent(new Event('recommendme-profile-invalid'));throw new DOMException('Профиль изменён.','AbortError');
     }if(body?.error==='schema_upgrade_required')throw new Error('База требует явного обновления схемы. Пользовательские данные не изменены.');}
     if(response.ok&&(response.headers.get('X-Profile-ID')!==active.user_id||response.headers.get('X-Profile-Selection')!==active.selection_id))throw new Error('Ответ приложения относится к другому профилю.');
     // Check after body parsing too: consumers use the returned Response asynchronously.

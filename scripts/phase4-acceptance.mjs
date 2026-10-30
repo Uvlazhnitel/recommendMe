@@ -169,6 +169,14 @@ try {
   await openMovie(first.batch.movies[0].title);const originalText=first.batch.movies[0].why_fit;assert.equal(await page.locator('.movie-explanation section').first().locator('p').innerText(),originalText);
   for(const key of ['Tab','Tab','Tab','Tab','Shift+Tab']) {await page.keyboard.press(key);assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('.movie-explanation'))));}
   await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);
+  for (const movie of first.batch.movies) {
+    assert.match(movie.title, /[А-Яа-яЁё]/u); assert.match(movie.why_fit, /[А-Яа-яЁё]/u); assert.match(movie.possible_mismatch, /[А-Яа-яЁё]/u);
+    await openMovie(movie.title);
+    assert.ok((await page.locator('.movie-explanation').innerText()).includes(movie.why_fit));
+    assert.ok((await page.locator('.movie-explanation').innerText()).includes(movie.possible_mismatch));
+    await page.keyboard.press('Escape');
+  }
+  check('all five cards render Russian TMDB titles, full explanations and risks from persistent cache');
   for(const width of [375,430]) {await page.setViewportSize({width,height:1000});await openMovie(first.batch.movies[0].title);assert.ok(await page.locator('.movie-explanation').evaluate(el=>el.scrollWidth<=el.clientWidth));await screenshot(`home-details-${width}`);await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);}
   await page.setViewportSize({width:1440,height:1000});
   check('gallery5 all widths, saved wishes distinct from draft, full explanations, modal Escape/focus');
@@ -246,8 +254,8 @@ try {
   const second=(await state()).batch;assert.notEqual(second.result_id,firstId);database(db=>assert.equal(db.prepare("SELECT count(*) n FROM recommendations WHERE user_id='ilya' AND result_id=?").get(firstId).n,5));check('second saved batch preserves first history and keeps previous screen during loading');
   // Fail only the final transaction, after providers and durable preparation succeeded.
   database(db=>db.exec("CREATE TRIGGER qa_fail_save BEFORE INSERT ON recommendations BEGIN SELECT RAISE(ABORT,'qa save failure'); END"));const countBefore=database(db=>db.prepare('SELECT count(*) n FROM movies').get().n);
-  await generate({round:3},500);await page.getByRole('button',{name:'Повторить сохранение без AI'}).waitFor();database(db=>{assert.equal(db.prepare('SELECT count(*) n FROM movies').get().n,countBefore);db.exec('DROP TRIGGER qa_fail_save');});
-  const paidBeforeRecovery=openaiCalls();await page.getByRole('button',{name:'Повторить сохранение без AI'}).click();await page.getByRole('status').filter({hasText:'Подборка сохранена. Новых запросов AI не было.'}).waitFor();assert.equal(openaiCalls(),paidBeforeRecovery);assert.equal((await state()).batch.movies.length,5);check('SQL rollback + durable save_only=1 recovery without OpenAI/TMDB');
+  await generate({round:3},500);await page.getByRole('button',{name:'Повторить сохранение без нового подбора'}).waitFor();database(db=>{assert.equal(db.prepare('SELECT count(*) n FROM movies').get().n,countBefore);db.exec('DROP TRIGGER qa_fail_save');});
+  const paidBeforeRecovery=openaiCalls();await page.getByRole('button',{name:'Повторить сохранение без нового подбора'}).click();await page.getByRole('status').filter({hasText:'Подборка сохранена. Новых запросов к модели не было.'}).waitFor();assert.equal(openaiCalls(),paidBeforeRecovery);assert.equal((await state()).batch.movies.length,5);check('SQL rollback + durable save_only=1 recovery without OpenAI/TMDB');
   // A backup path failure must happen before payment and leave the current batch untouched.
   const backups=join(fixture.dir,'backups'), held=join(fixture.dir,'backups-held');if(existsSync(backups))renameSync(backups,held);writeFileSync(backups,'qa blocks backup directory');
   const noPayment=openaiCalls(), stableBatch=(await state()).batch.result_id;

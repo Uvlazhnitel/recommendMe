@@ -37,11 +37,14 @@ globalThis.fetch = async (input, init) => {
     const context = JSON.parse(body.input.find(item => item.role === 'user').content);
     const candidates = control.mode === 'no_candidates' ? [] : available(control).map(movie => ({ title: movie.title, year: movie.year }));
     const recommendations = (context.candidates ?? []).slice(0, 5).map(movie => ({ tmdb_id: movie.tmdb_id,
-      why_fit: 'A synthetic explanation for interface acceptance, not a personal AI recommendation. Your high rating for Favourite supports examining emotional stakes and clear character choices. This remains a hypothesis: a shared genre alone cannot establish a preference. '.repeat(2),
-      possible_mismatch: 'The deliberate pace may differ from the lower-rated example. This is a synthetic uncertainty, not a demonstrated reason for your score.',
+      why_fit: 'Это синтетическое объяснение для проверки интерфейса. Высокая оценка любимого фильма даёт повод рассмотреть эмоциональные ставки и ясный выбор героев. Это гипотеза: общего жанра недостаточно, чтобы установить предпочтение. '.repeat(2),
+      possible_mismatch: 'Размеренный темп может отличаться от низко оценённого примера. Это синтетическое предположение, а причина вашей оценки неизвестна.',
       evidence: (context.current_evidence ?? []).slice(0,2).map(({movie_id,rating_100}) => ({movie_id,rating_100})),
     }));
-    const value = ranking ? { recommendations } : { candidates };
+    const value = body.text.format.name === 'russian_explanation' ? {
+      why_fit: 'Этот фильм может понравиться благодаря камерному сюжету и ясному выбору героев. Это предположение на основе сохранённых оценок.',
+      possible_mismatch: 'Размеренный темп может не подойти. Информации для уверенного вывода недостаточно.',
+    } : ranking ? { recommendations } : { candidates };
     return Response.json({ status: control.mode === 'incomplete' ? 'incomplete' : 'completed', model: 'phase4-mock-model',
       usage: { input_tokens: 50, output_tokens: 25 }, output: [{ type: 'message', content: control.mode === 'refusal' ? [{ type: 'refusal', refusal: 'Synthetic refusal' }] :
         [{ type: 'output_text', text: control.mode === 'invalid' ? '{bad-json' : JSON.stringify(value) }] }] });
@@ -58,7 +61,9 @@ globalThis.fetch = async (input, init) => {
   }
   const id = Number(url.pathname.split('/').at(-1)), movie = [...available(control), ...sources, ...extras].find(movie => movie.tmdb_id === id);
   if (!movie) return Response.json({}, { status: 404 });
-  return Response.json({ ...identity(movie), runtime: movie.runtime, genres: movie.genres, backdrop_path: movie.backdrop_path ?? null,
-    overview: 'Synthetic acceptance metadata. No live TMDB request was made. A story about choices, memory and human connection.',
+  const localized = url.searchParams.get('language') === 'ru-RU';
+  const russianTitles = {335984:'Бегущий по лезвию 2049',152601:'Она',120467:'Отель «Гранд Будапешт»',329865:'Прибытие',976893:'Идеальные дни'};
+  return Response.json({ ...identity(movie), ...(localized && russianTitles[id] ? { title: russianTitles[id] } : {}), runtime: movie.runtime, genres: movie.genres, backdrop_path: movie.backdrop_path ?? null,
+    overview: localized ? 'Синтетическое описание для проверки интерфейса: история о выборе, памяти и человеческой близости.' : 'Synthetic acceptance metadata. No live TMDB request was made. A story about choices, memory and human connection.',
     credits: { cast: [], crew: [{ id: 800001, name: 'QA Director', job: 'Director' }] }, vote_count: 10, popularity: 1 });
 };

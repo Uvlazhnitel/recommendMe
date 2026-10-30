@@ -74,7 +74,7 @@ export function RateWorkbench({ model: m, initialMovieId, initialMovieError }: {
 function OperationNotice({ model: m, onReload }: { model: Model; onReload: () => void }) {
   return <>
     {m.notice ? m.notice.error ? <ErrorState>{m.notice.text}</ErrorState> : <p className="success-state" role="status">{m.notice.text}</p> : null}
-    {m.matches.length ? <section className="rate-duplicates" aria-label="Возможные совпадения"><h3>Похожие записи в вашей истории</h3><p>Новая запись не добавлена. Эти фильмы не связаны автоматически.</p><ul>{m.matches.map(film => <li key={film.movie_id}><strong>{film.title}</strong><span>{film.year ?? 'Год неизвестен'} · Локальный ID {film.movie_id}</span></li>)}</ul></section> : null}
+    {m.matches.length ? <section className="rate-duplicates" aria-label="Возможные совпадения"><h3>Похожие записи в вашей истории</h3><p>Новая запись не добавлена. Эти фильмы не связаны автоматически.</p><ul>{m.matches.map(film => <li key={film.movie_id}><strong>{film.title}</strong><span>{film.year ?? 'Год неизвестен'} · Локальный номер {film.movie_id}</span></li>)}</ul></section> : null}
     {m.recoveryMovieId !== null ? <Button tone="quiet" type="button" disabled={m.busy || m.selecting} onClick={onReload}>Перечитать фильм</Button> : null}
   </>;
 }

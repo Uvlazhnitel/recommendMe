@@ -19,7 +19,7 @@ export function decideIdentity(input:IdentityInput,candidates:IdentityCandidate[
  const status=complete&&exact.length===1?'confirmed':unique.length?'ambiguous':'not_found';
  return {source_id:input.id,status,reason:status==='confirmed'?'unique_exact_title_year_type_details':!complete?'incomplete_search':input.year===null?'source_year_unknown':exact.length>1?'multiple_verified_matches':'no_unique_verified_match',candidates:unique,selected:status==='confirmed'?exact[0]:null};
 }
-function schema(db:Database.Database,user:UserId){personalScope(db,user);if(db.pragma('user_version',{simple:true})!==10)throw Error('Explicit schema 10 migration required');}
+function schema(db:Database.Database,user:UserId){personalScope(db,user);if((db.pragma('user_version',{simple:true}) as number)<10)throw Error('Explicit schema 10 migration required');}
 export function storeIdentityDecisions(db:Database.Database,user:UserId,sourceKey:string,sha:string,decisions:IdentityDecision[]){
  schema(db,user);return db.transaction(()=>{const source=db.prepare('SELECT sha256,document_json FROM legacy_import_sources WHERE user_id=? AND source_key=?').get(user,sourceKey) as {sha256:string;document_json:string}|undefined;if(source?.sha256!==sha)throw Error('Source checksum mismatch');
  const insert=db.prepare(`INSERT INTO legacy_identity_decisions(user_id,source_key,source_id,source_sha256,status,candidates_json,decision_json) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,source_key,source_id) DO UPDATE SET status=excluded.status,candidates_json=excluded.candidates_json,decision_json=excluded.decision_json WHERE legacy_identity_decisions.applied_movie_id IS NULL`);

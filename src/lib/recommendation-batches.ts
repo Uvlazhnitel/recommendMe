@@ -1,3 +1,4 @@
+import { russianMovie, russianGenres, russianExplanation, hasRussianCache } from './russian-presentation';
 import { requireProfileSchema } from './profiles';
 import { personalScope, type UserId } from './profiles';
 import { parsePreferences, type RecommendationPreferences } from './recommendation-preferences';
@@ -61,10 +62,12 @@ export function readRecommendationBatch(db: Database.Database, userId: UserId, r
         let genres: unknown;
         try { genres = JSON.parse(row.genres_json ?? '[]'); } catch { batch.unavailable_count++; continue; }
         if (!Array.isArray(genres) || !genres.every(genre => genre && typeof genre === 'object' && meaningful(genre.name))) { batch.unavailable_count++; continue; }
-        batch.movies.push({ movie_id: row.movie_id, tmdb_id: row.tmdb_id, title: row.tmdb_title ?? row.title, year, genres: genres.map(genre => genre.name),
+        const localized = russianMovie(db, row.tmdb_id);
+        const explanations = russianExplanation(db, userId, { ...row, why_fit: row.why_fit!, possible_mismatch: row.possible_mismatch! });
+        batch.movies.push({ movie_id: row.movie_id, tmdb_id: row.tmdb_id, title: localized?.title ?? row.tmdb_title ?? row.title, year, genres: (hasRussianCache(db) ? russianGenres(genres) : genres).map(genre => genre.name),
           runtime: row.runtime_minutes, poster_path: tmdbImage(row.poster_path) ? row.poster_path : null,
           backdrop_path: tmdbImage(row.backdrop_path) ? row.backdrop_path! : null,
-          why_fit: row.why_fit!, possible_mismatch: row.possible_mismatch! });
+          ...explanations });
       }
       return batch; // An exhausted latest batch must not fall back to older films.
     }

@@ -1,3 +1,4 @@
+import { beforeRussianLanguage } from './fixtures/before-russian-language';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -80,7 +81,7 @@ test('three-version comparison preserves seeds and fixed-input wire bytes; cap p
     const byId = new Map(f.candidates.map(row => [row.tmdb_id, row]));
     const previous = buildRankingContext(f.db, 'ilya', old.selected.map((id: number) => byId.get(id)!));
     const current = buildRankingContext(f.db, 'ilya', result.candidates);
-    assert.equal(wire(previous.input, previous.format), old.ranking_bytes);
+    assert.equal(wire(beforeRussianLanguage(previous.input), previous.format), old.ranking_bytes);
     assert.equal(wire(c.input, CANDIDATE_FORMAT), old.candidate_bytes);
     assert.deepEqual(c.seeds.map(row => row.movie_id), old.seeds);
     assert.deepEqual(old.excluded, [1020, 1021, 1022, 1023]);

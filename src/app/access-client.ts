@@ -13,7 +13,7 @@ export function clearAccess() {
 export async function accessFetch(path: string, init: RequestInit = {}) {
   const target = new URL(path, window.location.origin);
   if (!path.startsWith('/api/') || path.startsWith('//') || /[\\#]/.test(path) ||
-      target.origin !== window.location.origin || !target.pathname.startsWith('/api/')) throw new Error('Invalid application request');
+      target.origin !== window.location.origin || !target.pathname.startsWith('/api/')) throw new Error('Некорректный запрос к приложению.');
   const headers = new Headers(init.headers);
   let token = memoryToken;
   try { token = localStorage.getItem(STORAGE_KEY) ?? token; } catch {}

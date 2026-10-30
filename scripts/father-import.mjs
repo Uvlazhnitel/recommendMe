@@ -9,7 +9,7 @@ const sourceKey='father-list-v2';
 export function planFatherImport(db, owner, bytes) {
  if(owner!=='valeriy')throw Error('Import requires --user valeriy');
  const validation=validateFatherList(bytes);
- if(![9,10].includes(db.pragma('user_version',{simple:true})))throw Error('Explicit offline schema 9 migration required');
+ if(![9,10,11].includes(db.pragma('user_version',{simple:true})))throw Error('Explicit offline schema 9 migration required');
  const source=db.prepare('SELECT sha256 FROM legacy_import_sources WHERE user_id=? AND source_key=?').get(owner,sourceKey);
  const data=JSON.parse(bytes.toString('utf8'));
  const changed=source && source.sha256!==validation.sha256;

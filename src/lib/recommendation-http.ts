@@ -52,7 +52,7 @@ export function rejectionHandler(undo = false, dependencies: { open?: typeof ope
       return reply(await setRecommendationRejection(db, userId, tmdbId, undo, dependencies.backup));
     } catch (error) { if (error instanceof ProfileError) throw error;
       if (error instanceof RejectError) return reply({ error: error.code }, error.code === 'movie_not_found' ? 404 : 400);
-      return reply({ error: 'rejection_unavailable', message: 'The local rejection operation could not be completed.' }, 500);
+      return reply({ error: 'rejection_unavailable', message: 'Не удалось сохранить решение «Неинтересно».' }, 500);
     } finally { db?.close(); }
   });
 }

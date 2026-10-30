@@ -10,7 +10,7 @@ import { trapDialogFocus } from './home-gallery';
 
 type Context = {active:ProfileSelection|null;ready:boolean;error:string;choose:(id:string)=>Promise<void>;busy:boolean};
 const ProfileContext=createContext<Context|null>(null);
-function useProfile(){const value=useContext(ProfileContext);if(!value)throw Error('Profile provider missing');return value;}
+function useProfile(){const value=useContext(ProfileContext);if(!value)throw Error('Не удалось загрузить состояние профиля.');return value;}
 export function ProfileProvider({children}:{children:React.ReactNode}){
   const router=useRouter(),[active,setActive]=useState<ProfileSelection|null>(null),[ready,setReady]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const current=useRef<ProfileSelection|null>(null),sequence=useRef(0),channel=useRef<BroadcastChannel|null>(null);

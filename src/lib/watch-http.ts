@@ -25,7 +25,7 @@ export function watchHandler(dependencies: { open?: typeof openDatabase; backup?
       return reply(result, result.status === 'created' ? 201 : 200);
     } catch (error) { if (error instanceof ProfileError) throw error;
       if (error instanceof WatchError) return reply({ error: error.code }, error.code === 'movie_not_found' ? 404 : error.code === 'rating_already_exists' ? 409 : 400);
-      return reply({ error: 'watch_unavailable', message: 'The local watch operation could not be completed.' }, 500);
+      return reply({ error: 'watch_unavailable', message: 'Не удалось сохранить просмотр фильма.' }, 500);
     } finally { db?.close(); }
   });
 }

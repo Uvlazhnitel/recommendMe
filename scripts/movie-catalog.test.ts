@@ -38,7 +38,7 @@ test('interactive search preserves same-name years, optional year, poster, page 
   const { api, urls } = mocked(() => ({ total_pages: 2, results: [raw(), raw(11, 'Dune', '1984-12-14'), raw()] }));
   const first = await api.searchInteractive('Dune');
   assert.equal(first.results.length, 2); assert.equal(first.has_more, true); assert.equal(first.results[0].poster_path, null);
-  assert.equal(urls[0].searchParams.has('year'), false); assert.equal(urls[0].searchParams.get('language'), 'en-US');
+  assert.equal(urls[0].searchParams.has('year'), false); assert.equal(urls[0].searchParams.get('language'), 'ru-RU');
   await api.searchInteractive('Dune', 1984); assert.equal(urls[1].searchParams.get('year'), '1984');
   const strict = await api.search('Dune', 2021); assert.equal(strict.complete, true); assert.equal(urls.length, 4);
   assert.ok(urls.every(url => url.pathname === '/3/search/movie'));

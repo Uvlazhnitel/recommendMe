@@ -23,3 +23,5 @@ npm-debug.log*
 
 # Private prepared source for the one-time Valeriy import.
 /filmy-otca-final.json
+
+*.russian.lock

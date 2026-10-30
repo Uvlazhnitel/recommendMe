@@ -52,7 +52,7 @@ export function MovieEditor({ model: m, enhanced = false, collection = false, he
       <div className="rejection-controls">
         {enhanced ? <h3>{film.not_interested ? 'Скрыт из рекомендаций' : 'Не хотите видеть в рекомендациях?'}</h3> : null}
         <Button tone="quiet" type="button" disabled={film.tmdb_id === null} onClick={m.reject}>{m.pending === 'reject' ? 'Сохраняем…' : film.not_interested ? 'Снять «Неинтересно»' : 'Неинтересно'}</Button>
-        <p className="field-help">{film.tmdb_id === null ? 'Нужен подтверждённый TMDB ID.' : film.not_interested ? 'Текущий запрет можно снять. История отклонения сохранится.' : 'Это отдельное решение: оценка и факт просмотра не изменятся.'}</p>
+        <p className="field-help">{film.tmdb_id === null ? 'Нужен подтверждённый идентификатор TMDB.' : film.not_interested ? 'Текущий запрет можно снять. История отклонения сохранится.' : 'Это отдельное решение: оценка и факт просмотра не изменятся.'}</p>
       </div>
     </fieldset>
     {enhanced && film.overview ? <div className="editor-overview"><h3>О фильме</h3><p>{film.overview}</p></div> : null}

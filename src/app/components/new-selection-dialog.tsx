@@ -21,7 +21,7 @@ export function NewSelectionDialog({ dialog, step, preferences, confirmation, on
   }}>
     <div className="selection-dialog-heading"><div>
       <h2 id="selection-heading" tabIndex={-1} data-step-focus>{step === 'preferences' ? 'Новая подборка' : 'Начать персональный подбор?'}</h2>
-      <p id="selection-description">{step === 'preferences' ? 'Какого кино хочется сегодня?' : 'Подбор использует платный OpenAI API — обычно два запроса. Стоимость зависит от модели и объёма данных. Автоматического повтора после ошибки не будет.'}</p>
+      <p id="selection-description">{step === 'preferences' ? 'Какого кино хочется сегодня?' : 'Подбор использует платный сервис OpenAI — обычно два запроса. Стоимость зависит от модели и объёма данных. Автоматического повтора после ошибки не будет.'}</p>
     </div><Button tone="quiet" type="button" className="dialog-close" aria-label="Закрыть настройки" onClick={() => dialog.current?.close()}><Icon name="close" /></Button></div>
     <div className="selection-dialog-content">
       {step === 'preferences' ? <>

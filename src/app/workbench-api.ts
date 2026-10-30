@@ -3,7 +3,7 @@ export type Match = { movie_id: number; title: string; year: number | null };
 const errors: Record<string, string> = {
   invalid_search: 'Введите название (до 200 символов) и корректный год.', tmdb_unavailable: 'TMDB недоступен. Повторите поиск позже.',
   movie_not_found: 'Фильм не найден.', possible_duplicate: 'Возможно, фильм уже есть в старой истории. Автоматическое объединение не выполнено.',
-  invalid_tmdb_id: 'Некорректный TMDB ID.', invalid_movie_id: 'Некорректный локальный ID.',
+  invalid_tmdb_id: 'Некорректный идентификатор TMDB.', invalid_movie_id: 'Некорректный локальный идентификатор.',
   invalid_review: 'Впечатления должны содержать не более 2000 символов.',
   review_unavailable: 'Впечатления не сохранены. Текст остался в поле; попробуйте ещё раз.',
   request_too_large: 'Слишком большой запрос. Сократите текст.',
