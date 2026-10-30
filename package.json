@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "evaluation:report": "tsx scripts/evaluation-report.ts",
     "db:check": "tsx scripts/db-check.ts",
-    "test:db": "tsx --test scripts/db.test.ts scripts/schema.test.ts scripts/letterboxd.test.ts scripts/tmdb.test.ts scripts/foundation.test.ts scripts/taste.test.ts scripts/candidates.test.ts scripts/recommendations.test.ts scripts/recommendation-memory.test.ts scripts/movie-catalog.test.ts scripts/movie-watch.test.ts scripts/library.test.ts scripts/workflow.test.ts scripts/ui.test.ts scripts/recommendation-screen.test.ts scripts/rating-ui.test.tsx scripts/library-ui.test.tsx scripts/container-db.test.ts scripts/movie-reviews.test.ts scripts/taste-context-v2.test.ts scripts/candidates-v2.test.ts scripts/final-audit.test.ts scripts/evaluation.test.ts scripts/home-mood.test.tsx scripts/profiles.test.ts",
+    "test:db": "tsx --test scripts/db.test.ts scripts/schema.test.ts scripts/letterboxd.test.ts scripts/tmdb.test.ts scripts/foundation.test.ts scripts/taste.test.ts scripts/candidates.test.ts scripts/recommendations.test.ts scripts/recommendation-memory.test.ts scripts/movie-catalog.test.ts scripts/movie-watch.test.ts scripts/library.test.ts scripts/workflow.test.ts scripts/ui.test.ts scripts/recommendation-screen.test.ts scripts/rating-ui.test.tsx scripts/library-ui.test.tsx scripts/container-db.test.ts scripts/movie-reviews.test.ts scripts/taste-context-v2.test.ts scripts/candidates-v2.test.ts scripts/final-audit.test.ts scripts/evaluation.test.ts scripts/home-mood.test.tsx scripts/profiles.test.ts scripts/profile-requests.test.ts",
     "db:init": "tsx scripts/db-init.ts",
     "seed:letterboxd": "tsx scripts/seed-letterboxd.ts",
     "tmdb:enrich": "tsx scripts/tmdb-enrich.ts",

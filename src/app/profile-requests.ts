@@ -15,16 +15,20 @@ export function profilePositionKey(url:string) {return `recommendme-library:${st
 export async function profileFetch(url:string,init:RequestInit={}) {
   const current=state(),active=current.active,epoch=current.epoch;if(!active)throw new Error('Сначала выберите профиль.');
   const headers=new Headers(init.headers);headers.set('X-Profile-ID',active.user_id);headers.set('X-Profile-Selection',active.selection_id);
-  const controller=new AbortController(),reading=!init.method||init.method==='GET';if(reading)current.reads.add(controller);
+  const controller=new AbortController(),reading=!init.method||init.method.toUpperCase()==='GET';
+  const callerSignal=init.signal;
+  const abortFromCaller=()=>controller.abort(callerSignal?.reason);
+  if(reading){current.reads.add(controller);if(callerSignal?.aborted)abortFromCaller();else callerSignal?.addEventListener('abort',abortFromCaller,{once:true});}
+  const checkCurrent=()=>{if(current.epoch!==epoch)throw new DOMException('Profile changed','AbortError');if(reading&&controller.signal.aborted)throw controller.signal.reason ?? new DOMException('Aborted','AbortError');};
   try {
     const response=await fetch(url,{...init,headers,credentials:'same-origin',cache:'no-store',...(reading?{signal:controller.signal}:{})});
-    if(current.epoch!==epoch)throw new DOMException('Profile changed','AbortError');
-    if(!response.ok){const body=await response.clone().json().catch(()=>null);if(['profile_changed','profile_required','invalid_profile'].includes(body?.error)){
+    checkCurrent();
+    if(!response.ok){const body=await response.clone().json().catch(()=>null);checkCurrent();if(['profile_changed','profile_required','invalid_profile'].includes(body?.error)){
       applyBrowserProfile(null);window.dispatchEvent(new Event('recommendme-profile-invalid'));throw new DOMException('Profile changed','AbortError');
     }if(body?.error==='schema_upgrade_required')throw new Error('База требует явного обновления схемы. Пользовательские данные не изменены.');}
     if(response.ok&&(response.headers.get('X-Profile-ID')!==active.user_id||response.headers.get('X-Profile-Selection')!==active.selection_id))throw new Error('Ответ приложения относится к другому профилю.');
     // Check after body parsing too: consumers use the returned Response asynchronously.
-    const body=await response.arrayBuffer();if(current.epoch!==epoch)throw new DOMException('Profile changed','AbortError');
+    const body=await response.arrayBuffer();checkCurrent();
     return new Response(body,{status:response.status,statusText:response.statusText,headers:response.headers});
-  }finally{current.reads.delete(controller);}
+  }finally{callerSignal?.removeEventListener('abort',abortFromCaller);current.reads.delete(controller);}
 }
