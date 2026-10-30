@@ -22,8 +22,8 @@ COPY --from=build --chown=node:node /app/package.json /app/package-lock.json /ap
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/.next ./.next
 COPY --from=build --chown=node:node /app/migrations ./migrations
-COPY --from=build --chown=node:node /app/src/lib/db.ts /app/src/lib/migrations.ts ./src/lib/
-COPY --from=build --chown=node:node /app/scripts/container-db.mjs ./scripts/
+COPY --from=build --chown=node:node /app/src/lib ./src/lib/
+COPY --from=build --chown=node:node /app/scripts/container-db.mjs /app/scripts/db-init.ts /app/scripts/localize-ru.ts ./scripts/
 RUN mkdir -p data backups .next/cache && chown -R node:node data backups .next/cache
 USER node
 EXPOSE 3000

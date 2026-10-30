@@ -35,7 +35,8 @@
     "next": "^16.4.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -44,7 +45,6 @@
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.3",
-    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
   }
 }
