@@ -20,3 +20,6 @@ npm-debug.log*
 
 *.recommendations.lock
 .recommendation-runs/
+
+# Private prepared source for the one-time Valeriy import.
+/filmy-otca-final.json
