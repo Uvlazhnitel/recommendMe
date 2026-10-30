@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { PROFILES } from '@/lib/profiles';
 import type { ProfileSelection } from '@/lib/profile-http';
 import { applyBrowserProfile } from '../profile-requests';
+import { accessFetch } from '../access-client';
 import { Button } from './ui';
 import { trapDialogFocus } from './home-gallery';
 
@@ -19,7 +20,7 @@ export function ProfileProvider({children}:{children:React.ReactNode}){
   },[router]);
   const load=useCallback(async(reset=false)=>{
     const id=++sequence.current;
-    try{const response=await fetch('/api/profile',{cache:'no-store',credentials:'same-origin'});const body=await response.json();if(id!==sequence.current)return;
+    try{const response=await accessFetch('/api/profile');const body=await response.json();if(id!==sequence.current)return;
       if(!response.ok){apply(null,reset);setError('Выберите профиль заново.');return;}
       apply(body.active,reset||Boolean(current.current&&current.current.selection_id!==body.active?.selection_id));setError('');
     }catch{if(id===sequence.current)setError('Не удалось проверить профиль. Повторно откройте приложение.');}
@@ -33,7 +34,7 @@ export function ProfileProvider({children}:{children:React.ReactNode}){
     return()=>{clearTimeout(initial);sequence.current++;channel.current?.close();window.removeEventListener('storage',storage);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);window.removeEventListener('recommendme-profile-invalid',sync);};
   },[apply,load]);
   async function choose(id:string){if(busy)return;setBusy(true);setError('');
-    try{const response=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:id}),credentials:'same-origin'});if(!response.ok)throw Error();
+    try{const response=await accessFetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:id})});if(!response.ok)throw Error();
       apply(null,true);await load(true);channel.current?.postMessage('changed');try{localStorage.setItem('recommendme-profile-change',crypto.randomUUID());}catch{}
     }catch{apply(null,true);setError('Выбор не подтверждён. Проверьте профиль перед продолжением.');await load(true);}
     finally{setBusy(false);}

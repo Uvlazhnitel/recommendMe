@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PROFILES, ProfileError, userId, type UserId } from './profiles';
 import { assertWriteOrigin, JsonInputError, readJsonBody } from './http-json';
+import { requireAccess } from './access';
 
 export const PROFILE_COOKIE = 'recommendme_profile';
 export type ProfileSelection = { user_id: UserId; selection_id: string };
@@ -30,20 +31,22 @@ export function requireProfile(request: Request): ProfileSelection {
 export function profileRoute<A extends unknown[]>(handler:(request:Request,owner:UserId,...args:A)=>Response|Promise<Response>) {
   return async(request:Request,...args:A):Promise<Response>=>{
     try {
+      requireAccess(request);
       assertWriteOrigin(request);
       const profile=requireProfile(request);
       const response=await handler(request,profile.user_id,...args);
       response.headers.set('X-Profile-ID',profile.user_id);response.headers.set('X-Profile-Selection',profile.selection_id);
-      response.headers.set('Cache-Control','no-store');response.headers.set('Vary','Cookie, X-Profile-ID, X-Profile-Selection');
+      response.headers.set('Cache-Control','no-store');response.headers.set('Vary','Authorization, Cookie, X-Profile-ID, X-Profile-Selection');
       return response;
     }catch(error){return profileError(error);}
   };
 }
 export function getProfile(request:Request) {
-  try {return Response.json({profiles:PROFILES,active:selectedProfile(request)},{headers:{'Cache-Control':'no-store','Vary':'Cookie'}});}catch(error){return profileError(error);}
+  try {requireAccess(request);assertWriteOrigin(request);return Response.json({profiles:PROFILES,active:selectedProfile(request)},{headers:{'Cache-Control':'no-store','Vary':'Authorization, Cookie'}});}catch(error){return profileError(error);}
 }
 export async function chooseProfile(request:Request) {
   try {
+    requireAccess(request);
     const body=await readJsonBody(request);
     if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==1||!('user_id' in body))throw new ProfileError('invalid_profile');
     const active:ProfileSelection={user_id:userId(body.user_id),selection_id:randomUUID()};

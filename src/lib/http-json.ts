@@ -1,8 +1,7 @@
 export class JsonInputError extends Error {
   constructor(public readonly code: string, public readonly status = 400) { super(code); }
 }
-export function assertWriteOrigin(request: Request) {
-  const origin = request.headers.get('origin');
+export function requestOrigin(request: Request) {
   // NextURL normalizes loopback hostnames to localhost. Host retains the actual
   // HTTP authority used by the browser; forwarded host/proto headers are ignored.
   let target = new URL(request.url);
@@ -12,8 +11,13 @@ export function assertWriteOrigin(request: Request) {
     try { target = new URL(`${target.protocol}//${host}`); }
     catch { throw new JsonInputError('forbidden_origin', 403); }
   }
+  return target.origin;
+}
+export function assertWriteOrigin(request: Request) {
+  const origin = request.headers.get('origin');
+  const targetOrigin = requestOrigin(request);
   const site = request.headers.get('sec-fetch-site')?.toLowerCase();
-  if (site === 'cross-site' || (origin !== null && (origin === 'null' || origin !== target.origin)) ||
+  if (site === 'cross-site' || (origin !== null && (origin === 'null' || origin !== targetOrigin)) ||
     (origin === null && site !== undefined && site !== 'same-origin' && site !== 'none')) {
     throw new JsonInputError('forbidden_origin', 403);
   }

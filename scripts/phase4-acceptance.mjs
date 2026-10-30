@@ -66,7 +66,7 @@ async function start() {
   await new Promise((resolveReady,reject)=>{const server=createServer();server.once('error',()=>reject(Error(`Test port ${port} is occupied; no process was stopped.`)));server.listen(port,'127.0.0.1',()=>server.close(resolveReady));});
   const log=openSync(join(output,'server.log'),'a');
   child=spawn(process.execPath,[join(root,'node_modules/next/dist/bin/next'),'start','--hostname','127.0.0.1','--port',String(port)],{cwd:root,detached:true,stdio:['ignore',log,log],env:{...process.env,
-    DATABASE_PATH:fixture.path,OPENAI_API_KEY:'phase4-mock-openai',OPENAI_MODEL:'phase4-mock-model',TMDB_API_KEY:'phase4-mock-tmdb',NEXT_TELEMETRY_DISABLED:'1',
+    ACCESS_MODE:'local',DATABASE_PATH:fixture.path,OPENAI_API_KEY:'phase4-mock-openai',OPENAI_MODEL:'phase4-mock-model',TMDB_API_KEY:'phase4-mock-tmdb',NEXT_TELEMETRY_DISABLED:'1',
     PHASE4_CONTROL:controlPath,PHASE4_CALLS:callsPath,NODE_OPTIONS:`--import ${join(root,'scripts/fixtures/phase4-providers.mjs')}`}});closeSync(log);
   await until(async()=>{const r=await fetch(base+'/api/health');return r.ok;},'isolated production server');
 }

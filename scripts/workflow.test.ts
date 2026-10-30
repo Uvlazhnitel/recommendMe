@@ -203,7 +203,7 @@ test('Origin follows the actual HTTP Host for NextRequest loopback URLs while re
 });
 
 test('workbench understands the catalog conflict status payload and preserves optional blank versus score zero', async t => {
-  Object.defineProperty(globalThis,'window',{value:{recommendmeProfile:{active:{user_id:'ilya',selection_id:'test'},epoch:0,reads:new Set()}},configurable:true});
+  Object.defineProperty(globalThis,'window',{value:{location:{origin:'http://localhost'},recommendmeProfile:{active:{user_id:'ilya',selection_id:'test'},epoch:0,reads:new Set()}},configurable:true});
   t.after(()=>Reflect.deleteProperty(globalThis,'window'));
   const matches = [{ movie_id: 4, title: 'Unresolved', year: 2000 }];
   t.mock.method(globalThis, 'fetch', async () => Response.json({ status: 'possible_duplicate', tmdb_id: 201, matches }, { status: 409 }));
