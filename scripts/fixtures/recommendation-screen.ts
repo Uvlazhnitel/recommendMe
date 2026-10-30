@@ -17,7 +17,7 @@ export function fixture(version = SCHEMA_VERSION) {
   const db = new Database(path); db.pragma('foreign_keys=ON');
   if (version === SCHEMA_VERSION) migrateDatabase(db);
   else {
-    for (const file of ['001_initial','002_letterboxd_rating_date','003_tmdb_metadata','004_recommendation_memory','005_movie_backdrop','006_movie_reviews','007_evaluation'].slice(0,version)) db.exec(readFileSync(`migrations/${file}.sql`, 'utf8'));
+    for (const file of ['001_initial','002_letterboxd_rating_date','003_tmdb_metadata','004_recommendation_memory','005_movie_backdrop','006_movie_reviews','007_evaluation','008_profiles','009_legacy_marks'].slice(0,version)) db.exec(readFileSync(`migrations/${file}.sql`, 'utf8'));
     db.pragma(`user_version=${version}`);
   }
   migrateDatabase(db);

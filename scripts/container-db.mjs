@@ -25,7 +25,7 @@ function inspect(path) {
     if (db.pragma('integrity_check', { simple: true }) !== 'ok' || db.pragma('foreign_key_check').length) throw Error('SQLite integrity verification failed.');
     const schema = db.pragma('user_version', { simple: true });
     if (schema < 1 || schema > SCHEMA_VERSION) throw Error('Unsupported SQLite schema.');
-    return { schema, counts: Object.fromEntries([...tables, ...(schema >= 8 ? ['profiles'] : []), ...(schema >= 7 ? ['recommendation_evaluation', 'recommendation_outcomes'] : [])].map(table => [table, db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n])) };
+    return { schema, counts: Object.fromEntries([...tables, ...(schema >= 10 ? ['legacy_identity_decisions', 'personal_rating_history'] : []), ...(schema >= 9 ? ['legacy_import_sources', 'legacy_movie_marks'] : []), ...(schema >= 8 ? ['profiles'] : []), ...(schema >= 7 ? ['recommendation_evaluation', 'recommendation_outcomes'] : [])].map(table => [table, db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n])) };
   } finally { db.close(); }
 }
 

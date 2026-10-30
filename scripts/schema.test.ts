@@ -29,14 +29,14 @@ function fixture(initialize = true) {
   return { db, path, cleanup() { db.close(); rmSync(directory, { recursive: true, force: true }); } };
 }
 
-test('fresh schema has seven STRICT tables; reinitialization preserves rows and version', () => {
+test('fresh schema has eleven STRICT tables; reinitialization preserves rows and version', () => {
   const { db, cleanup } = fixture(false);
   try {
     assert.equal(db.pragma('foreign_keys', { simple: true }), 1);
     assert.equal(db.pragma('user_version', { simple: true }), 0);
     assert.equal(migrateDatabase(db), SCHEMA_VERSION);
     const tables = db.prepare("SELECT name, strict FROM pragma_table_list WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all();
-    assert.deepEqual(tables, ['movies', 'profiles', 'recommendation_evaluation', 'recommendation_outcomes', 'recommendations', 'taste_profile', 'user_movies'].map(name => ({ name, strict: 1 })));
+    assert.deepEqual(tables, ['legacy_identity_decisions', 'legacy_import_sources', 'legacy_movie_marks', 'movies', 'personal_rating_history', 'profiles', 'recommendation_evaluation', 'recommendation_outcomes', 'recommendations', 'taste_profile', 'user_movies'].map(name => ({ name, strict: 1 })));
     db.prepare('INSERT INTO movies (title, release_year) VALUES (?, ?)').run('Фильм', 2000);
     db.exec('INSERT INTO user_movies (user_id,movie_id, watched) VALUES (\'ilya\',1, 1)');
     db.exec('INSERT INTO recommendations (user_id,movie_id) VALUES (\'ilya\',1)');

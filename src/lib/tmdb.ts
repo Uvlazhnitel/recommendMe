@@ -87,9 +87,9 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
   const now = dependencies.now ?? Date.now;
   let previousStart: number | null = null;
   const stats = { requests: 0, failedRequests: 0 };
-  async function request(path: string, params: Record<string, string>): Promise<unknown> {
+  async function request(path: string, params: Record<string, string>, language = 'en-US'): Promise<unknown> {
     const url = new URL(`https://api.themoviedb.org/3${path}`);
-    url.search = new URLSearchParams({ ...params, api_key: apiKey!.trim(), language: 'en-US' }).toString();
+    url.search = new URLSearchParams({ ...params, api_key: apiKey!.trim(), language }).toString();
     for (let attempt = 0; attempt < 3; attempt++) {
       if (stats.requests >= (dependencies.maxRequests ?? Infinity)) throw new TmdbError('TMDB request budget exhausted.', true);
       if (previousStart !== null) await sleep(Math.max(0, 250 - (now() - previousStart)));
@@ -127,6 +127,21 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
   }
   return {
     stats,
+    async identitySearch(query: string, releaseYear: number | null, mediaType: 'movie'|'tv', language='ru-RU') {
+      const params:Record<string,string>={query,page:'1',include_adult:'true'};
+      if(releaseYear!==null)params[mediaType==='tv'?'first_air_date_year':'year']=String(releaseYear);
+      const body=object(await request(`/search/${mediaType}`,params,language));
+      if(!Array.isArray(body.results))throw new TmdbError('Invalid identity search');
+      return {candidates:body.results.map(value=>{const r=object(value);return {id:id(r.id),title:title(mediaType==='tv'?r.name:r.title),original_title:string(mediaType==='tv'?r.original_name:r.original_title),year:year(mediaType==='tv'?r.first_air_date:r.release_date)};}),complete:Number(body.total_pages??0)<=1};
+    },
+    async identityDetails(identityId:number, mediaType:'movie'|'tv', language='ru-RU') {
+      id(identityId);const raw=await request(`/${mediaType}/${identityId}`,{append_to_response:'credits'},language);
+      if(mediaType==='movie')return {...parseDetails(raw),media_type:mediaType};
+      const r=object(raw);if(id(r.id)!==identityId)throw new TmdbError('Wrong TV identity');
+      return {id:identityId,title:title(r.name),original_title:string(r.original_name),year:year(r.first_air_date),runtime:null,
+        overview:string(r.overview),genres:array(r.genres)?.map(v=>{const g=object(v);return {id:id(g.id),name:title(g.name)};})??null,
+        directors:null,poster_path:string(r.poster_path),backdrop_path:string(r.backdrop_path),media_type:mediaType};
+    },
     async recommendations(movieId: number) {
       id(movieId);
       const body = object(await request(`/movie/${movieId}/recommendations`, { page: '1' }));

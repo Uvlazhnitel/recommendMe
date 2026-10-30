@@ -1,3 +1,4 @@
+import {currentEvidence,type EvidenceRef} from './historical-evidence';
 import { assertReportOwner } from './profiles';
 import { requireProfileSchema } from './profiles';
 import { personalScope, type UserId } from './profiles';
@@ -9,7 +10,6 @@ import { dirname, resolve } from 'node:path';
 import type Database from 'better-sqlite3';
 import { blockedReason, readCandidateHistory } from './candidate-context';
 import { parseCandidateReport, validateRanking } from './recommendation-schema';
-import type { Evidence } from './taste-schema';
 
 export type RecordRequest = { tmdbIds: number[]; result?: never } | { result: unknown; tmdbIds?: never };
 export type SaveReport = { status: 'preview' | 'saved' | 'already_saved' | 'skipped' | 'error'; result_id: string | null;
@@ -42,8 +42,9 @@ function savedRanking(value: unknown, now: number) {
       Object.keys(row).some(key => !['tmdb_id', 'title', 'year', 'why_fit', 'possible_mismatch', 'evidence'].includes(key))) throw new Error('Invalid or duplicate recommendation in saved result.');
     seen.add(row.tmdb_id);
     const evidence = row.evidence.map(ref => {
-      if (!object(ref) || Object.keys(ref).some(key => !['movie_id', 'rating_100', 'title', 'year'].includes(key))) throw new Error('Invalid saved evidence.');
-      return { movie_id: ref.movie_id, rating_100: ref.rating_100 };
+      if (!object(ref) || Object.keys(ref).some(key => !['movie_id', 'rating_100', 'kind', 'sentiment', 'title', 'year'].includes(key))) throw new Error('Invalid saved evidence.');
+      if(ref.kind==='historical'&&Object.hasOwn(ref,'rating_100')||ref.kind!=='historical'&&(Object.hasOwn(ref,'kind')||Object.hasOwn(ref,'sentiment')))throw new Error('Invalid saved evidence kind.');
+      return ref.kind==='historical'?{movie_id:ref.movie_id,kind:ref.kind,sentiment:ref.sentiment}:{ movie_id: ref.movie_id, rating_100: ref.rating_100 };
     });
     return { tmdb_id: row.tmdb_id, why_fit: row.why_fit, possible_mismatch: row.possible_mismatch, evidence };
   });
@@ -69,7 +70,7 @@ export function recordRecommendations(db: Database.Database, userId: UserId, can
   } else {
     const saved = savedRanking(request.result, now); resultId = saved.resultId; recommendedAt = saved.generatedAt; rows = saved.rows;
     // Check response shape and evidence syntax even on an idempotent replay; historical ratings may have changed.
-    const syntaxSnapshot = rows.flatMap(row => row.evidence).filter(object).map(ref => ({ movie_id: ref.movie_id, rating_100: ref.rating_100 })) as Evidence[];
+    const syntaxSnapshot = rows.flatMap(row => row.evidence).filter(object).map(ref => ref.kind==='historical'?{movie_id:ref.movie_id,kind:ref.kind,sentiment:ref.sentiment}:{ movie_id: ref.movie_id, rating_100: ref.rating_100 }) as EvidenceRef[];
     const checked = validateRanking({ recommendations: rows }, [...candidates.values()], syntaxSnapshot);
     if (checked.diagnostics.length || checked.recommendations.length !== rows.length) throw new Error('Saved ranking failed structural validation.');
   }
@@ -92,13 +93,13 @@ export function recordRecommendations(db: Database.Database, userId: UserId, can
       report.skipped = rows.filter(row => !previous.some(saved => saved.tmdb_id === row.tmdb_id)).map(row => ({ tmdb_id: row.tmdb_id, reason: 'result_already_processed' }));
       return report;
     }
-    const history = readCandidateHistory(db, userId), ratings = new Map(history.map(row => [row.id, row.rating_100]));
+    const history = readCandidateHistory(db, userId);
     for (const row of rows) {
       const movie = candidates.get(row.tmdb_id)!;
       const reason = blockedReason({ id: movie.tmdb_id, title: movie.title, original_title: movie.original_title, year: movie.year }, history, now) || preferenceExclusion(movie, parsePreferences(preferences ?? undefined));
       if (reason) { report.skipped.push({ tmdb_id: movie.tmdb_id, reason }); continue; }
       if (!manual) {
-        const snapshot = [...ratings].flatMap(([movie_id, rating_100]) => rating_100 === null ? [] : [{ movie_id, rating_100 }]);
+        const snapshot = currentEvidence(db,userId);
         const checked = validateRanking({ recommendations: [row] }, [movie], snapshot);
         if (!checked.recommendations.length) { report.skipped.push({ tmdb_id: movie.tmdb_id, reason: 'invalid_or_changed_evidence' }); continue; }
       }

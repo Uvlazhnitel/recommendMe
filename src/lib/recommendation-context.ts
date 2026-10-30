@@ -1,3 +1,4 @@
+import {HISTORICAL_GUIDANCE,type EvidenceRef} from './historical-evidence';
 import { personalScope, type UserId } from './profiles';
 import { parsePreferences, customPreferences, preferenceGuidance, type RecommendationPreferences } from './recommendation-preferences';
 import type Database from 'better-sqlite3';
@@ -22,7 +23,7 @@ export function buildRankingContext(db: Database.Database, userId: UserId, candi
   const personal = prepareTasteInputs(db, userId);
   const high = personal.examples.filter(row => row.rating_100 >= 80).slice(0, 10), low = personal.examples.filter(row => row.rating_100 <= 60).slice(0, 10);
   const related = selectRelatedExamples(personal.pool, candidates, [...high, ...low], personal.taste?.context.contrast_pairs ?? []);
-  const format = rankingFormat(candidates.map(row => row.tmdb_id));
+  const format = rankingFormat(candidates.map(row => row.tmdb_id),Boolean(personal.historical.length));
   let candidateOverview = 1200, exampleOverview = 600, relatedLimit = 10, perGroup = 10, pairs = 6;
   const makeContext = (includeReviews = true) => {
     const examples = [...high.slice(0, perGroup), ...low.slice(0, perGroup)].map(row => reviewExample(row, includeReviews ? personal.reviews : new Map(), exampleOverview, includeReviews ? personal.changedReviews : new Set()));
@@ -30,16 +31,17 @@ export function buildRankingContext(db: Database.Database, userId: UserId, candi
     const contrasts = personal.taste?.context.contrast_pairs.slice(0, pairs) ?? [];
     const evidenceIds = new Set([...personal.evidenceMovies.map(row => row.movie_id), ...personal.changes.map(row => row.movie_id),
       ...examples.map(row => row.movie_id), ...relatedSelected.map(row => row.movie_id), ...contrasts.flatMap(row => [row.higher.movie_id, row.lower.movie_id])]);
-    const currentEvidence = [...evidenceIds].sort((a, b) => a - b).flatMap(id => {
+    const numericEvidence = [...evidenceIds].sort((a, b) => a - b).flatMap(id => {
       const row = personal.byId.get(id);
       return row && row.rating_100 !== null ? [{ movie_id: id, title: row.title, year: row.release_year, rating_100: row.rating_100 }] : [];
     });
-    return { ...(customPreferences(wishes) ? { request_preferences: wishes } : {}), profile: personal.profile, profile_evidence_movies: personal.evidenceMovies, rating_changes: personal.changes,
+    const currentEvidence:({title:string;year:number|null}&EvidenceRef)[]=[...numericEvidence,...personal.historical.map(ref=>({...ref,title:personal.byId.get(ref.movie_id)!.title,year:personal.byId.get(ref.movie_id)!.release_year}))];
+    return { ...(customPreferences(wishes) ? { request_preferences: wishes } : {}), profile: personal.profile, profile_evidence_movies: personal.evidenceMovies, rating_changes: personal.changes,...(personal.historical.length||personal.saved.historical_snapshot?{historical_changes:personal.historicalChanges,historical_examples:personal.taste?.context.historical_examples??[]}:{}),
       examples, related_examples: relatedSelected, contrasts, current_evidence: currentEvidence,
       candidates: candidates.map(row => ({ tmdb_id: row.tmdb_id, media_type: row.media_type, title: row.title, original_title: row.original_title, year: row.year,
         overview: truncate(row.overview, candidateOverview), genres: row.genres, runtime: row.runtime, directors: row.directors, vote_count: row.vote_count, popularity: row.popularity })) };
   };
-  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: RANKING_PROMPT + guidance }, { role: 'user', content: JSON.stringify(value) }], text: { format } }), 'utf8');
+  const requestBytes = (value: unknown) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: RANKING_PROMPT + guidance + (personal.historical.length||personal.saved.historical_snapshot?'\n'+HISTORICAL_GUIDANCE:'') }, { role: 'user', content: JSON.stringify(value) }], text: { format } }), 'utf8');
   while (requestBytes(makeContext(false)) > maxBytes) {
     if (candidateOverview) candidateOverview = candidateOverview > 300 ? candidateOverview / 2 : 0;
     else if (exampleOverview) exampleOverview = exampleOverview > 150 ? exampleOverview / 2 : 0;
@@ -50,7 +52,7 @@ export function buildRankingContext(db: Database.Database, userId: UserId, candi
   }
   const baselineBytes = requestBytes(makeContext(false));
   let context = makeContext();
-  const input = () => [{ role: 'system', content: RANKING_PROMPT + guidance + (personal.reviews.size || personal.saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
+  const input = () => [{ role: 'system', content: RANKING_PROMPT + guidance + (personal.historical.length||personal.saved.historical_snapshot?'\n'+HISTORICAL_GUIDANCE:'') + (personal.reviews.size || personal.saved.reviews_snapshot?.length ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
   const bytes = () => Buffer.byteLength(JSON.stringify({ input: input(), text: { format } }), 'utf8');
   trimReviewExcerpts([...context.examples, ...context.related_examples], bytes() - reviewInputBudget(baselineBytes, [...context.examples, ...context.related_examples]));
   while (bytes() > maxBytes) {
@@ -65,9 +67,9 @@ export function buildRankingContext(db: Database.Database, userId: UserId, candi
   }
   if (!context.current_evidence.length) throw new Error('No current rated evidence is available for ranking; no API call made.');
   const stale = personal.taste?.fingerprint !== personal.saved.context_fingerprint;
-  return { context, input: input(), format, snapshot: context.current_evidence.map(({ movie_id, rating_100 }) => ({ movie_id, rating_100 })),
+  return { context, input: input(), format, snapshot: context.current_evidence.map(ref=>'kind' in ref?{movie_id:ref.movie_id,kind:ref.kind,sentiment:ref.sentiment}:{movie_id:ref.movie_id,rating_100:ref.rating_100}) as EvidenceRef[],
     warnings: stale ? ['Saved taste profile is stale; current evidence and all rating changes override old conclusions. No profile regeneration.'] : [],
-    summary: { profile_version: personal.saved.profile_version, profile_prompt_version: personal.saved.prompt_version, profile_schema_version: personal.saved.schema_version, profile_status: stale ? 'stale' : 'current', ratings_count: personal.rated.length,
+    summary: { ...(personal.historical.length||personal.saved.historical_snapshot?{historical_feedback:true}:{}),profile_version: personal.saved.profile_version, profile_prompt_version: personal.saved.prompt_version, profile_schema_version: personal.saved.schema_version, profile_status: stale ? 'stale' : 'current', ratings_count: personal.rated.length,
       candidates: candidates.length, rating_changes: personal.changes.length, profile_refresh: personal.profileRefresh, high_examples: Math.min(perGroup, high.length), low_examples: Math.min(perGroup, low.length),
       related_examples: context.related_examples.length, contrasts: context.contrasts.length, current_evidence: context.current_evidence.length,
       review_context: reviewContextSize(baselineBytes, bytes()), input_bytes: bytes(), max_input_bytes: maxBytes, candidate_overview_limit: candidateOverview, example_overview_limit: exampleOverview,

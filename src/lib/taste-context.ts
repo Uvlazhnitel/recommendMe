@@ -1,3 +1,4 @@
+import {historicalEvidence,HISTORICAL_GUIDANCE,HISTORICAL_PROFILE_FORMAT} from './historical-evidence';
 import { personalScope, type UserId } from './profiles';
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
@@ -13,7 +14,7 @@ For every pattern give concise explanation, structured evidence IDs with their e
 For contrasts cite two different local movie IDs with a gap of at least 20, the confirmed similarity and a cautiously phrased possible difference; disclose that causes of ratings cannot be proven from metadata. If input contrast pairs exist, produce at least one contrast. Do not infer unprovided attributes for works that have only title/year/rating.
 Keep references in structured evidence fields. Do not supply movie URLs or invent titles, ratings, or IDs in prose. The application resolves display names from SQLite. Include explicit uncertainties, especially where few examples, missing metadata or contradictory ratings limit a conclusion.
 Aim for 4-6 positive and 4-6 negative patterns when supported, up to 12 contrasts, and concise uncertainties. Do not fill quotas with weak claims; missing evidence must remain uncertain. Return only the specified JSON schema.`;
-type Row = { movie_id: number; title: string; year: number | null; rating_100: number; tmdb_id: number | null;
+type Row = { media_type?:string; movie_id: number; title: string; year: number | null; rating_100: number; tmdb_id: number | null;
   overview: string | null; genres_json: string | null; directors_json: string | null; runtime_minutes: number | null };
 type Person = { id: number; name: string };
 type Rated = { movie_id: number; title: string; year: number | null; rating_100: number };
@@ -92,7 +93,11 @@ export function buildTasteContext(database: Database.Database, userId: UserId, m
   const reviews = readReviewTexts(database, userId), reviewsSnapshot = reviewSnapshot(reviews);
   const rows = database.prepare(`SELECT m.id movie_id,m.title,m.release_year year,u.rating_100,m.tmdb_id,m.overview,m.genres_json,m.directors_json,m.runtime_minutes
     FROM movies m JOIN user_movies u ON m.id=u.movie_id AND u.user_id=@userId WHERE u.rating_100 IS NOT NULL ORDER BY m.id`).all({userId}) as Row[];
-  if (!rows.length) throw new Error('No rated works are available for taste analysis.');
+  const historicalSnapshot=historicalEvidence(database,userId);
+  const historicalRows=historicalSnapshot.map(ref=>{const row=database.prepare('SELECT id movie_id,title,release_year year,media_type,tmdb_id,overview,genres_json,directors_json,runtime_minutes FROM movies WHERE id=?').get(ref.movie_id) as Row;return {...ref,title:row.title,year:row.year,media_type:row.media_type,details:metadata(row)};});
+  const format=historicalSnapshot.length?HISTORICAL_PROFILE_FORMAT:PROFILE_FORMAT;
+  const prompt=TASTE_SYSTEM_PROMPT+(historicalSnapshot.length?'\n'+HISTORICAL_GUIDANCE+' Use historical_patterns for historical observations and the numeric pattern fields only for numeric evidence. Leave unsupported numeric patterns and contrasts empty; never invent ratings to fill them.':'');
+  if (!rows.length && !historicalSnapshot.length) throw new Error('No rated works are available for taste analysis.');
   const ratings: Rated[] = rows.map(({ movie_id, title, year, rating_100 }) => ({ movie_id, title, year, rating_100 }));
   const snapshot: Evidence[] = ratings.map(({ movie_id, rating_100 }) => ({ movie_id, rating_100 }));
   const details = new Map(rows.filter(row => row.tmdb_id !== null).map(row => [row.movie_id, metadata(row)]));
@@ -103,22 +108,22 @@ export function buildTasteContext(database: Database.Database, userId: UserId, m
   const selected = selectExamples(rows, details);
   const allPairs = selectContrasts(rows, details);
   let overviewLimit = 600, perGroup = 20, pairLimit = 12;
-  const makeContext = (includeReviews = true) => ({ statistics, ratings, detailed_examples: (['high', 'medium', 'low'] as const).flatMap(group => selected[group].slice(0, perGroup).map(id => {
+  const makeContext = (includeReviews = true) => ({ statistics, ratings, ...(historicalRows.length?{historical_feedback:historicalRows.map(r=>({movie_id:r.movie_id,kind:r.kind,sentiment:r.sentiment,title:r.title,year:r.year,media_type:r.media_type})),historical_examples:historicalRows.filter(r=>historicalRows.filter(x=>x.sentiment===r.sentiment).indexOf(r)<perGroup).map(({details,...r})=>({...r,...details,overview:details.overview?details.overview.slice(0,overviewLimit):null}))}:{}), detailed_examples: (['high', 'medium', 'low'] as const).flatMap(group => selected[group].slice(0, perGroup).map(id => {
     const item = details.get(id)!;
     return reviewExample(item, includeReviews ? reviews : new Map(), overviewLimit);
   })), contrast_pairs: allPairs.slice(0, pairLimit) });
-  const requestBytes = (value: unknown, prompt: string) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: prompt }, { role: 'user', content: JSON.stringify(value) }], text: { format: PROFILE_FORMAT } }), 'utf8');
+  const requestBytes = (value: unknown, prompt: string) => Buffer.byteLength(JSON.stringify({ input: [{ role: 'system', content: prompt }, { role: 'user', content: JSON.stringify(value) }], text: { format } }), 'utf8');
   // Compute the old bounded preparation independently so comparisons use the same data/limits.
-  while (requestBytes(makeContext(false), TASTE_SYSTEM_PROMPT) > maxBytes) {
+  while (requestBytes(makeContext(false), prompt) > maxBytes) {
     if (overviewLimit > 0) overviewLimit = overviewLimit > 150 ? Math.floor(overviewLimit / 2) : 0;
     else if (perGroup > 0) perGroup--;
     else if (pairLimit > 0) pairLimit--;
     else throw new Error('All ratings plus required prompt/schema exceed the input byte limit; no ratings were dropped.');
   }
-  const baselineBytes = requestBytes(makeContext(false), TASTE_SYSTEM_PROMPT);
+  const baselineBytes = requestBytes(makeContext(false), prompt);
   let context = makeContext();
-  const inputFor = () => [{ role: 'system', content: TASTE_SYSTEM_PROMPT + (reviews.size ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
-  const size = () => Buffer.byteLength(JSON.stringify({ input: inputFor(), text: { format: PROFILE_FORMAT } }), 'utf8');
+  const inputFor = () => [{ role: 'system', content: prompt + (reviews.size ? '\n' + REVIEW_GUIDANCE : '') }, { role: 'user', content: JSON.stringify(context) }];
+  const size = () => Buffer.byteLength(JSON.stringify({ input: inputFor(), text: { format } }), 'utf8');
   trimReviewExcerpts(context.detailed_examples, size() - reviewInputBudget(baselineBytes, context.detailed_examples));
   while (size() > maxBytes) {
     if (overviewLimit > 0) overviewLimit = overviewLimit > 150 ? Math.floor(overviewLimit / 2) : 0;
@@ -129,8 +134,8 @@ export function buildTasteContext(database: Database.Database, userId: UserId, m
     trimReviewExcerpts(context.detailed_examples, size() - reviewInputBudget(baselineBytes, context.detailed_examples));
   }
   const input = inputFor(); const inputBytes = size();
-  const fingerprint = createHash('sha256').update(JSON.stringify({ prompt_version: PROMPT_VERSION, schema_version: PROFILE_SCHEMA_VERSION, input, format: PROFILE_FORMAT, ...(reviewsSnapshot.length ? { reviews_snapshot: reviewsSnapshot } : {}) })).digest('hex');
-  return { context, exampleOverviews: new Map(makeContext(false).detailed_examples.map(row => [row.movie_id, row.overview])), snapshot, reviewsSnapshot, fingerprint, input, inputBytes, summary: { ...statistics, detailed_examples: context.detailed_examples.length,
+  const fingerprint = createHash('sha256').update(JSON.stringify({ prompt_version: PROMPT_VERSION, schema_version: historicalSnapshot.length?2:PROFILE_SCHEMA_VERSION, input, format, ...(reviewsSnapshot.length ? { reviews_snapshot: reviewsSnapshot } : {}) })).digest('hex');
+  return { context, exampleOverviews: new Map(makeContext(false).detailed_examples.map(row => [row.movie_id, row.overview])), snapshot, historicalSnapshot, format, reviewsSnapshot, fingerprint, input, inputBytes, summary: { ...statistics, detailed_examples: context.detailed_examples.length,
     example_groups: Object.fromEntries((['high', 'medium', 'low'] as const).map(group => [group, Math.min(perGroup, selected[group].length)])),
     contrast_pairs: context.contrast_pairs.length, overview_limit: overviewLimit, input_bytes: inputBytes, max_input_bytes: maxBytes, review_context: reviewContextSize(baselineBytes, inputBytes),
     estimated_input_tokens: Math.ceil(inputBytes / 3), token_estimate_notice: 'Approximation from UTF-8 bytes, not an exact tokenizer count. Schema and prompts included.' } };

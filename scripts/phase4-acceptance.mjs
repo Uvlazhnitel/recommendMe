@@ -374,6 +374,27 @@ try {
   await page.getByRole('button',{name:'Сменить профиль: Илья'}).waitFor();releaseLate();await page.unrouteAll({behavior:'wait'});
   assert.equal((await state()).batch!==null,true);assert.equal(openaiCalls(),paidBefore+2);
   await secondTab.close();check('two tabs: remembered profile, isolated libraries/zero/reviews, discarded draft, late read, in-flight Ilya generation and foreign replay');
+  // Historical feedback UI: staged synthetic import, ordinary numeric controls only.
+  const historicalCalls=openaiCalls();
+  database(db=>{const library=[1,2].map(id=>({id:`ui-${id}`,source_ids:[`occ-${id}`]}));const doc={library,occurrences:library.map((r,i)=>({id:r.source_ids[0],library_id:r.id,raw:i?'👎':'👍😭',external_ratings:[{raw:'9.1',source:null}]}))};
+    db.prepare("INSERT INTO legacy_import_sources(user_id,source_key,sha256,document_json) VALUES('valeriy','qa-ui',?,?)").run('a'.repeat(64),JSON.stringify(doc));
+    for(const id of [1,2]){db.prepare("INSERT INTO user_movies(user_id,movie_id,watched) VALUES('valeriy',?,1)").run(id);db.prepare("INSERT INTO legacy_movie_marks(user_id,source_key,source_id,movie_id,sentiment,identity_confirmed) VALUES('valeriy','qa-ui',?,?,?,1)").run(`ui-${id}`,id,id===1?'liked':'disliked');}
+  });
+  await page.getByRole('button',{name:'Сменить профиль: Илья'}).click();await page.getByRole('dialog').getByRole('button',{name:'Валерий',exact:true}).click();await page.getByRole('button',{name:'Сменить профиль: Валерий'}).waitFor();
+  for(const [index,width] of [1440,375].entries()){
+    const id=index+1;await page.setViewportSize({width,height:1000});await go(`/library?movie_id=${id}`);await rating().waitFor();
+    await page.getByText('Отметка из старого списка: '+(id===1?'понравилось':'не понравилось'),{exact:true}).waitFor();
+    await page.getByText('Внешний рейтинг: 9.1 · Источник неизвестен',{exact:true}).waitFor();
+    assert.equal(await rating().inputValue(),'');await saveRating(0);await page.getByText(/Отметка из старого списка:.*заменена личной оценкой/).waitFor();await saveRating(75);await clearRating();await page.getByText(/Отметка из старого списка:.*заменена личной оценкой/).waitFor();
+    await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).waitFor();
+    database(db=>{const row=db.prepare("SELECT watched,rating_100,watchlist FROM user_movies WHERE user_id='valeriy' AND movie_id=?").get(id);assert.deepEqual(row,{watched:1,rating_100:null,watchlist:1});assert.equal(db.prepare("SELECT numeric_override FROM legacy_movie_marks WHERE user_id='valeriy' AND movie_id=?").get(id).numeric_override,1);});
+    await screenshot(`legacy-editor-${width}`,true);await go('/library?watchlist=true');await libraryReady();assert.equal(await page.locator('.library-grid>li').count(),1);await go(`/library?movie_id=${id}`);await rating().waitFor();await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).waitFor();
+    assert.equal((await(await http.get(base+'/api/library?watchlist=true')).json()).total,0);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  }
+  await go('/rate?movie_id=3');await rating().waitFor();await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).waitFor();
+  database(db=>assert.deepEqual(db.prepare("SELECT watched,rating_100,watchlist FROM user_movies WHERE user_id='valeriy' AND movie_id=3").get(),{watched:0,rating_100:null,watchlist:1}));
+  await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).waitFor();
+  assert.equal(openaiCalls(),historicalCalls);check('historical marks desktop/mobile: external ratings labelled, 0/edit/clear supersedes history, independent watchlist; zero paid calls');
   assert.equal(errors.length,0,errors.join('\n'));report.mock_calls={openai:openaiCalls(),tmdb:calls('api.themoviedb.org')};report.status='passed';
 } catch(error) {
   report.status='failed';report.failure=error.message;

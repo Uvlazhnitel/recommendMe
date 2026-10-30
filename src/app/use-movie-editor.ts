@@ -4,9 +4,9 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, json, message, scoreValue, type Match } from './workbench-api';
 
 export type Film = { movie_id: number; tmdb_id: number | null; title: string; year: number | null; watched: boolean;
-  rating_100: number | null; review_text?: string | null; rating_source: string; not_interested: boolean; original_rating_stars: number | null; poster_path: string | null;
+  legacy_unconfirmed?:boolean;watchlist?:boolean;external_ratings?:{raw:string;source:string|null}[];legacy_marks?: {sentiment:'liked'|'disliked'|'mixed'|null;superseded:boolean}[]; rating_100: number | null; review_text?: string | null; rating_source: string; not_interested: boolean; original_rating_stars: number | null; poster_path: string | null;
   original_title?: string | null; tmdb_title?: string | null; directors?: { id: number; name: string }[] | null; overview?: string | null; runtime_minutes?: number | null; genres?: { id: number; name: string }[] | null };
-type Operation = 'select' | 'watch' | 'rating' | 'clear' | 'reject' | 'review';
+type Operation = 'select' | 'watch' | 'rating' | 'clear' | 'reject' | 'review' | 'watchlist';
 
 // One controller for local selection and explicit writes on both rating screens.
 export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
@@ -105,6 +105,7 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
       return { movieId, text: review.trim() ? 'Впечатления сохранены.' : 'Впечатления удалены.' };
     });
   }
+  function toggleWatchlist(){if(!selected)return;const film=selected;void action('watchlist',async()=>{await api(`/api/library/${film.movie_id}/watchlist`,json({watchlist:!film.watchlist},'PATCH'));return {movieId:film.movie_id,text:film.watchlist?'Удалено из списка «Посмотреть».':'Добавлено в список «Посмотреть».'};});}
   function reject() {
     if (!selected || selected.tmdb_id === null) return;
     const film = selected;
@@ -117,6 +118,6 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
   function clearFeedback() { setNotice(null); setMatches([]); }
   const initialLoading = initialMovieId !== undefined && initialMovieId !== loadedInitialId;
   return { selected: initialLoading ? null : selected, selecting: selecting || initialLoading, score, setScore, review, setReview, saveReview, busy, pending, notice, matches, recoveryMovieId, watchConfirmed, addingId, setAddingId,
-    choose, action, watch, saveScore, edit, reject, cancelDetails, clearFeedback, setNotice, isLocked: () => actionLock.current };
+    choose, action, watch, saveScore, edit, reject, toggleWatchlist, cancelDetails, clearFeedback, setNotice, isLocked: () => actionLock.current };
 }
 export type MovieEditorModel = ReturnType<typeof useMovieEditor>;

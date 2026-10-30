@@ -1,3 +1,4 @@
+import {currentEvidence,evidenceIsCurrent,type EvidenceRef} from './historical-evidence';
 import { assertReportOwner } from './profiles';
 import { personalScope, type UserId } from './profiles';
 import { parsePreferences, preferenceExclusion, samePreferences, type RecommendationPreferences } from './recommendation-preferences';
@@ -8,13 +9,12 @@ import { buildRankingContext } from './recommendation-context';
 import { parseCandidateReport, validateRanking, type RankingDiagnostic } from './recommendation-schema';
 import { requestStructuredOutput, requireOpenAIConfig, type OpenAIOptions, type Usage } from './openai';
 import type { MovieCandidate } from './candidates';
-import type { Evidence } from './taste-schema';
 import { randomUUID } from 'node:crypto';
 import { RECOMMENDATION_REPEAT_DAYS } from './recommendation-policy';
 import { backupForRecommendationWrite, recordRecommendations, type SaveReport } from './recommendation-memory';
 
 export type RankedRecommendation = { tmdb_id: number; title: string; year: number; why_fit: string; possible_mismatch: string;
-  evidence: (Evidence & { title: string; year: number | null })[] };
+  evidence: (EvidenceRef & { title: string; year: number | null })[] };
 function exclusion(movie: MovieCandidate, history: ReturnType<typeof readCandidateHistory>) {
   if (movie.media_type !== 'movie') return 'not_movie';
   if (!Number.isSafeInteger(movie.runtime) || movie.runtime < 60) return 'invalid_runtime';
@@ -62,7 +62,7 @@ export async function rankRecommendations(db: Database.Database, userId: UserId,
     for (const recommendation of checked.recommendations) {
       const movie = allowed.get(recommendation.tmdb_id)!;
       let reason = exclusion(movie, current) || preferenceExclusion(movie, parsePreferences(preferences));
-      if (!reason && recommendation.evidence.some(ref => currentById.get(ref.movie_id)?.rating_100 !== ref.rating_100)) reason = 'evidence_changed';
+      if (!reason && recommendation.evidence.some(ref => !evidenceIsCurrent(ref,currentEvidence(db,userId)))) reason = 'evidence_changed';
       if (reason) { diagnostics.push({ stage: 'final', tmdb_id: movie.tmdb_id, reason }); continue; }
       result.recommendations.push({ ...recommendation, title: movie.title, year: movie.year,
         evidence: recommendation.evidence.map(ref => ({ ...ref, title: currentById.get(ref.movie_id)!.title, year: currentById.get(ref.movie_id)!.release_year })) });

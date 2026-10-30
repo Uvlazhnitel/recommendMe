@@ -4,12 +4,14 @@ export const librarySorts = {
   added_desc: 'Недавно добавленные', added_asc: 'Ранее добавленные',
   rating_desc: 'Высокая оценка → низкая', rating_asc: 'Низкая оценка → высокая',
 } as const;
-export type LibraryState = { q: string; rated: 'all' | 'true' | 'false'; year: string; sort: keyof typeof librarySorts; page: number };
+export type LibraryState = { q: string; rated: 'all' | 'true' | 'false'; year: string; sort: keyof typeof librarySorts; page: number;watchlist?:boolean };
 export const defaultLibraryState: LibraryState = { q: '', rated: 'all', year: '', sort: 'added_desc', page: 1 };
 export function parseLibraryState(params: URLSearchParams): { state: LibraryState; movieId?: number; error?: string } {
   const state = { ...defaultLibraryState };
   const invalid = () => ({ state, error: 'Некорректные параметры библиотеки. Сбросьте фильтры или исправьте ссылку.' });
-  for (const key of ['q','rated','year','sort','page','movie_id']) if (params.getAll(key).length > 1) return invalid();
+  for (const key of ['q','rated','year','sort','page','movie_id','watchlist']) if (params.getAll(key).length > 1) return invalid();
+  if(params.has('watchlist')&&params.get('watchlist')!=='true')return invalid();
+  if(params.get('watchlist')==='true')state.watchlist=true;
   const q = params.get('q')?.trim() ?? '', rated = params.get('rated') ?? 'all', sort = params.get('sort') ?? 'added_desc';
   const year = params.get('year') ?? '', page = params.get('page') ?? '1';
   if ([...q].length > 200 || !['all','true','false'].includes(rated) || !Object.hasOwn(librarySorts, sort) ||
@@ -22,6 +24,7 @@ export function parseLibraryState(params: URLSearchParams): { state: LibraryStat
 }
 export function libraryParams(state: LibraryState) {
   const params = new URLSearchParams();
+  if(state.watchlist)params.set('watchlist','true');
   if (state.q) params.set('q', state.q);
   if (state.rated !== 'all') params.set('rated', state.rated);
   if (state.year) params.set('year', state.year);

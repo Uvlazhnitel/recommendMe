@@ -1,3 +1,4 @@
+import {historicalEvidence,validateHistoricalProfile,type HistoricalEvidence,type HistoricalPattern} from './historical-evidence';
 import { personalScope, type UserId } from './profiles';
 import { readReviewTexts, reviewSnapshot, type ReviewSnapshot } from './review-context';
 import { openSync, closeSync, writeFileSync, unlinkSync, fstatSync, statSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { buildTasteContext, type TasteContext } from './taste-context';
 import { PROFILE_SCHEMA_VERSION, PROMPT_VERSION, validateProfile, type Evidence, type ProfileBody } from './taste-schema';
 import { parseUsage, requestTasteProfile, requireOpenAIConfig, type Usage } from './openai-taste';
 
-export type StoredProfile = ProfileBody & { profile_version: number; generated_at: string; ratings_count: number; ratings_snapshot: Evidence[]; reviews_snapshot?: ReviewSnapshot;
+export type StoredProfile = ProfileBody & { profile_version: number; generated_at: string; ratings_count: number; ratings_snapshot: Evidence[]; reviews_snapshot?: ReviewSnapshot; historical_snapshot?:HistoricalEvidence[]; historical_patterns?:HistoricalPattern[];
   context_fingerprint: string; prompt_version: number; schema_version: number; contrast_pairs_count: number;
   requested_model: string; model: string; response_id: string | null; usage: Usage | null };
 const bodyFields = ['strong_preferences', 'negative_patterns', 'contrasts', 'uncertainties'] as const;
@@ -23,8 +24,8 @@ export function parseStoredProfile(raw: string): StoredProfile {
   try { value = JSON.parse(raw); } catch { throw new Error('Saved taste profile is invalid JSON; use --live --force to replace it.'); }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid saved taste profile.');
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).filter(key => key !== 'reviews_snapshot').length !== bodyFields.length + metadataFields.length || [...bodyFields, ...metadataFields].some(key => !Object.hasOwn(record, key))) throw new Error('Invalid saved profile fields.');
-  if (!positiveInteger(record.profile_version) || !positiveInteger(record.ratings_count) || !positiveInteger(record.prompt_version) || record.schema_version !== PROFILE_SCHEMA_VERSION ||
+  if (Object.keys(record).filter(key => !['reviews_snapshot','historical_snapshot','historical_patterns'].includes(key)).length !== bodyFields.length + metadataFields.length || [...bodyFields, ...metadataFields].some(key => !Object.hasOwn(record, key))) throw new Error('Invalid saved profile fields.');
+  if (!positiveInteger(record.profile_version) || !(Number.isSafeInteger(record.ratings_count)&&Number(record.ratings_count)>=0) || !positiveInteger(record.prompt_version) || ![PROFILE_SCHEMA_VERSION,2].includes(Number(record.schema_version)) ||
     typeof record.generated_at !== 'string' || !Number.isFinite(Date.parse(record.generated_at)) || new Date(record.generated_at).toISOString() !== record.generated_at ||
     typeof record.context_fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(record.context_fingerprint) ||
     !Number.isSafeInteger(record.contrast_pairs_count) || (record.contrast_pairs_count as number) < 0 || (record.contrast_pairs_count as number) > 12 ||
@@ -36,7 +37,11 @@ export function parseStoredProfile(raw: string): StoredProfile {
   const snapshot = record.ratings_snapshot as Evidence[];
   if (snapshot.length !== record.ratings_count || new Set(snapshot.map(row => row?.movie_id)).size !== snapshot.length || snapshot.some(row => !row || Object.keys(row).length !== 2 ||
     !positiveInteger(row.movie_id) || !Number.isSafeInteger(row.rating_100) || row.rating_100 < 0 || row.rating_100 > 100)) throw new Error('Invalid saved ratings snapshot.');
-  validateProfile(Object.fromEntries(bodyFields.map(key => [key, record[key]])), snapshot, (record.contrast_pairs_count as number) > 0);
+  const numericBody=Object.fromEntries(bodyFields.map(key=>[key,record[key]]));
+  if(record.schema_version===2){
+    if(!Array.isArray(record.historical_snapshot)||record.historical_snapshot.some(e=>!e||Object.keys(e).length!==3||!positiveInteger(e.movie_id)||e.kind!=='historical'||!['liked','disliked','mixed'].includes(e.sentiment))||new Set(record.historical_snapshot.map(e=>e.movie_id)).size!==record.historical_snapshot.length)throw Error('Invalid historical snapshot');
+    validateHistoricalProfile({...numericBody,historical_patterns:record.historical_patterns},snapshot,record.historical_snapshot as HistoricalEvidence[],Number(record.contrast_pairs_count)>0);
+  }else {if(record.historical_snapshot!==undefined||record.historical_patterns!==undefined||!snapshot.length)throw Error('Invalid legacy profile');validateProfile(numericBody,snapshot,Number(record.contrast_pairs_count)>0);}
   parseUsage(record.usage);
   return value as StoredProfile;
 }
@@ -76,7 +81,7 @@ export async function generateTasteProfile(database: Database.Database, userId: 
   if (options.force && !options.live) throw new Error('--force requires --live.');
   let saved = savedOrNull(database, userId, Boolean(options.force));
   const ratedCount = (database.prepare('SELECT count(*) n FROM user_movies WHERE user_id=@userId AND rating_100 IS NOT NULL').get({userId}) as { n: number }).n;
-  if (ratedCount === 0 && saved && !options.force) {
+  if (ratedCount === 0 && !historicalEvidence(database,userId).length && saved && !options.force) {
     return { mode: options.live ? 'cached' : 'dry-run', cache: 'stale', profile_version: saved.profile_version,
       ratings_count: options.live ? saved.ratings_count : 0, notice: 'No currently rated works. Previous profile retained; no API call made.' };
   }
@@ -95,7 +100,7 @@ export async function generateTasteProfile(database: Database.Database, userId: 
     const priorRaw = rawProfile(database, userId);
     await database.backup(options.backupPath);
     const result = await requestTasteProfile(context, options);
-    const body = validateProfile(result.body, context.snapshot, context.context.contrast_pairs.length > 0);
+    const body = context.historicalSnapshot.length?validateHistoricalProfile(result.body,context.snapshot,context.historicalSnapshot,context.context.contrast_pairs.length>0):validateProfile(result.body, context.snapshot, context.context.contrast_pairs.length > 0);
     const profile = database.transaction(() => {
       if (buildTasteContext(database, userId).fingerprint !== context.fingerprint || JSON.stringify(reviewSnapshot(readReviewTexts(database, userId))) !== JSON.stringify(context.reviewsSnapshot)) throw new Error('Ratings, reviews or analysis context changed during generation. Previous profile retained; no automatic retry.');
       if (rawProfile(database, userId) !== priorRaw) throw new Error('Saved profile changed during generation. Previous profile retained.');
@@ -106,7 +111,7 @@ export async function generateTasteProfile(database: Database.Database, userId: 
       }
       if (!Number.isSafeInteger(version + 1)) throw new Error('Profile version overflow.');
       const profile: StoredProfile = { ...body, profile_version: version + 1, generated_at: new Date().toISOString(), ratings_count: context.snapshot.length,
-        ratings_snapshot: context.snapshot, reviews_snapshot: context.reviewsSnapshot, context_fingerprint: context.fingerprint, prompt_version: PROMPT_VERSION, schema_version: PROFILE_SCHEMA_VERSION,
+        ratings_snapshot: context.snapshot, reviews_snapshot: context.reviewsSnapshot, context_fingerprint: context.fingerprint, prompt_version: PROMPT_VERSION, schema_version: context.historicalSnapshot.length?2:PROFILE_SCHEMA_VERSION, ...(context.historicalSnapshot.length?{historical_snapshot:context.historicalSnapshot}:{}),
         contrast_pairs_count: context.context.contrast_pairs.length, requested_model: options.model!.trim(), model: result.model,
         response_id: result.response_id, usage: result.usage };
       database.prepare('INSERT INTO taste_profile (user_id,profile_json) VALUES (@userId,?) ON CONFLICT(user_id) DO UPDATE SET profile_json=excluded.profile_json').run({userId}, JSON.stringify(profile));
@@ -140,5 +145,6 @@ export function displayTasteProfile(database: Database.Database, userId: UserId)
   for (const pair of saved.contrasts) lines.push(`${ref(pair.higher)} vs ${ref(pair.lower)}`, `Similarity: ${pair.similarity}`, `Possible difference: ${pair.possible_difference}`, `Uncertainty: ${pair.uncertainty}`);
   lines.push('\nUncertainties');
   for (const uncertainty of saved.uncertainties) lines.push(uncertainty.description, ...uncertainty.evidence.map(ref));
+  if(saved.historical_patterns){const active=new Map(historicalEvidence(database,userId).map(e=>[e.movie_id,e.sentiment]));lines.push('\nHistorical observations');for(const p of saved.historical_patterns)lines.push(p.summary,p.explanation,`Uncertainty: ${p.uncertainty}`,...p.evidence.map(e=>`${byId.get(e.movie_id)?.title??'Unavailable'} [#${e.movie_id}, historical: ${e.sentiment}${active.get(e.movie_id)===e.sentiment?'':'; replaced or unavailable'}]`));}
   return lines.join('\n');
 }

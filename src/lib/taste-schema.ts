@@ -6,7 +6,7 @@ export type Contrast = { higher: Evidence; lower: Evidence; similarity: string; 
 export type ProfileBody = { strong_preferences: Pattern[]; negative_patterns: Pattern[]; contrasts: Contrast[];
   uncertainties: { description: string; evidence: Evidence[] }[] };
 
-type Schema = { type: string; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean;
+export type Schema = { type: string; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean;
   items?: Schema; enum?: string[]; minimum?: number; maximum?: number; minLength?: number; maxLength?: number; minItems?: number; maxItems?: number };
 const text = (maxLength: number): Schema => ({ type: 'string', minLength: 1, maxLength });
 const object = (properties: Record<string, Schema>): Schema => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
@@ -22,7 +22,7 @@ export const PROFILE_SCHEMA = object({
 export const PROFILE_FORMAT = { type: 'json_schema', name: 'personal_movie_taste', strict: true, schema: PROFILE_SCHEMA };
 
 // Validate the same small schema sent to OpenAI; no dependency or second divergent contract.
-function validateShape(value: unknown, schema: Schema): void {
+export function validateShape(value: unknown, schema: Schema): void {
   if (schema.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Profile contains an invalid object.');
     const record = value as Record<string, unknown>;
@@ -39,7 +39,7 @@ function validateShape(value: unknown, schema: Schema): void {
     throw new Error('Profile contains an invalid integer.');
   }
 }
-export function validateProfile(value: unknown, snapshot: Evidence[], hasInputContrasts: boolean): ProfileBody {
+export function validateProfile(value: unknown, snapshot: Evidence[], hasInputContrasts: boolean, allowHistorical = false): ProfileBody {
   validateShape(value, PROFILE_SCHEMA);
   const body = value as ProfileBody;
   const ratings = new Map(snapshot.map(row => [row.movie_id, row.rating_100]));
@@ -67,6 +67,6 @@ export function validateProfile(value: unknown, snapshot: Evidence[], hasInputCo
     pairs.add(key);
   }
   if (hasInputContrasts && !body.contrasts.length) throw new Error('Profile is missing contrasts.');
-  if (!body.strong_preferences.length && !body.negative_patterns.length && !body.contrasts.length) throw new Error('Profile has no substantive observations.');
+  if (!allowHistorical && !body.strong_preferences.length && !body.negative_patterns.length && !body.contrasts.length) throw new Error('Profile has no substantive observations.');
   return body;
 }

@@ -9,10 +9,10 @@ export type StageEvaluation = {
   prompt_sha256: string; format_sha256: string; model: string | null; usage: Usage | null;
 };
 export function stageEvaluation(input: { role: string; content: string }[], format: unknown,
-  profile: { profile_version: number; profile_prompt_version: number; profile_schema_version: number }, preferences?: RecommendationPreferences): StageEvaluation {
+  profile: { profile_version: number; profile_prompt_version: number; profile_schema_version: number;historical_feedback?:boolean }, preferences?: RecommendationPreferences): StageEvaluation {
   const sha = process.env.APP_GIT_SHA ?? '';
   const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  return { algorithm_id: preferences && customPreferences(preferences) ? 'recommendme-2.0-home-mood-v1' : ALGORITHM_ID, candidate_selection: 'candidates-v2-audit1', git_sha: /^[a-f0-9]{40}$/.test(sha) ? sha : 'unknown',
+  return { algorithm_id: profile.historical_feedback?'recommendme-2.0-historical-v1':preferences && customPreferences(preferences) ? 'recommendme-2.0-home-mood-v1' : ALGORITHM_ID, candidate_selection: profile.historical_feedback?'candidates-v2-historical-v1':'candidates-v2-audit1', git_sha: /^[a-f0-9]{40}$/.test(sha) ? sha : 'unknown',
     profile_version: profile.profile_version, profile_prompt_version: profile.profile_prompt_version, profile_schema_version: profile.profile_schema_version,
     prompt_sha256: hash(input.filter(row => row.role === 'system')), format_sha256: hash(format), model: null, usage: null };
 }

@@ -53,7 +53,7 @@ for (const version of [3, 4, 5, 6]) test(`2/3/16: historical rows after explicit
     const r = evaluationReport(f.db, 'ilya'); assert.equal(r.total.observed, 0); assert.equal(r.total.hit_rate_80.percent, null); assert.equal(r.total.status, 'insufficient_data');
     if (version >= 4) { assert.equal(r.algorithms[0].algorithm_id, 'unknown'); assert.equal(r.total.tokens.input_tokens.known_tokens, null); }
     else assert.equal(r.unidentified_recommendations, 1);
-    assert.deepEqual(readFileSync(f.path), before); assert.equal(f.db.pragma('user_version', { simple: true }), 8);
+    assert.deepEqual(readFileSync(f.path), before); assert.equal(f.db.pragma('user_version', { simple: true }), 10);
   } finally { f.cleanup(); }
 });
 

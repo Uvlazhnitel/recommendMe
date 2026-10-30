@@ -33,28 +33,38 @@ export function selectSeeds(history: HistoryRow[], profile: ProfileBody, rotatio
     const key = (row: ExampleSample) => [
       -row.patterns.filter(id => !patterns.has(id)).length,
       Math.max(0, ...selected.map(other => overlap(row.genre_ids, other.genre_ids))),
-      selected.filter(other => intersects(row.example.directors.map(p => p.id), other.example.directors.map(p => p.id))).length,
+      selected.filter(other => intersects(row.example.directors.map(p=>p.id), other.example.directors.map(p => p.id))).length,
       order.get(row)!,
     ];
     const row = available.filter(row => row.example.rating_100 >= bestRating - 10).sort((a, b) => compare(key(a), key(b)))[0];
     selected.push(row); usedTmdb.add(byId.get(row.example.movie_id)!.tmdb_id!);
     row.patterns.forEach(id => patterns.add(id));
   }
-  return selected.map(sample => {
+  const numeric=selected.map(sample => {
     const row = byId.get(sample.example.movie_id)!;
     return { movie_id: row.id, tmdb_id: row.tmdb_id!, title: row.title, year: row.release_year };
   });
+  const chosenIds=new Set(numeric.map(r=>r.movie_id));const h=historicalSupport(history).filter(r=>r.sentiment==='liked'&&!byId.get(r.movie_id)!.not_interested&&byId.get(r.movie_id)!.media_type==='movie'&&(byId.get(r.movie_id)!.runtime_minutes??0)>=60&&!numeric.some(n=>n.tmdb_id===byId.get(r.movie_id)!.tmdb_id));
+  const histOrder=[...h].sort((a,b)=>a.movie_id-b.movie_id);const off=histOrder.length?rotation%histOrder.length:0;const rotated=[...histOrder.slice(off),...histOrder.slice(0,off)];
+  while(numeric.length<5){const available=rotated.filter(r=>!chosenIds.has(r.movie_id)&&!numeric.some(n=>n.tmdb_id===byId.get(r.movie_id)!.tmdb_id));if(!available.length)break;
+   const selectedMetadata=numeric.flatMap(n=>{const row=byId.get(n.movie_id)!;return [{genre_ids:JSON.parse(row.genres_json??'[]').map((g:{id:number})=>g.id),directors:JSON.parse(row.directors_json??'[]').map((d:{id:number})=>d.id)}]});
+   const key=(r:SupportSample)=>[Math.max(0,...selectedMetadata.map(m=>overlap(r.genre_ids,m.genre_ids))),selectedMetadata.filter(m=>intersects(r.directors,m.directors)).length,rotated.indexOf(r as typeof rotated[number])];
+   const next=available.sort((a,b)=>compare(key(a),key(b)))[0];const row=byId.get(next.movie_id)!;chosenIds.add(row.id);numeric.push({movie_id:row.id,tmdb_id:row.tmdb_id!,title:row.title,year:row.release_year});
+  }
+  return numeric;
 }
 
 type Support = 'none' | 'single' | 'independent';
-function support(candidate: MovieCandidate, history: ExampleSample[]): Support {
+type SupportSample={movie_id:number;genre_ids:number[];directors:number[]};
+function historicalSupport(history:HistoryRow[]){return history.flatMap(row=>{if(!row.historical_sentiment||row.tmdb_id===null)return [];const gs=JSON.parse(row.genres_json??'[]') as {id:number}[],ds=JSON.parse(row.directors_json??'[]') as {id:number}[];if(!gs.length&&!ds.length)return [];return [{movie_id:row.id,genre_ids:gs.map(g=>g.id),directors:ds.map(d=>d.id),sentiment:row.historical_sentiment}];});}
+function support(candidate: MovieCandidate, history: SupportSample[]): Support {
   const ds = directors(candidate), gs = candidate.genres.map(genre => genre.id);
-  const directorLinks = history.filter(row => intersects(ds, row.example.directors.map(p => p.id)));
+  const directorLinks = history.filter(row => intersects(ds, row.directors));
   const genreLinks = history.filter(row => row.genre_ids.filter(id => gs.includes(id)).length >= 2);
   // Two different films with confirmed, disjoint directors. Repetition of one
   // director or one genre cluster never accumulates an unbounded taste score.
-  const independent = directorLinks.some(a => genreLinks.some(b => a.example.movie_id !== b.example.movie_id &&
-    b.example.directors.length > 0 && !intersects(a.example.directors.map(p => p.id), b.example.directors.map(p => p.id))));
+  const independent = directorLinks.some(a => genreLinks.some(b => a.movie_id !== b.movie_id &&
+    b.directors.length > 0 && !intersects(a.directors, b.directors)));
   return independent ? 'independent' : directorLinks.length || genreLinks.length ? 'single' : 'none';
 }
 const supportOrder: Record<Support, number> = { none: 0, single: 1, independent: 2 };
@@ -64,7 +74,9 @@ const sourceCounts = (rows: MovieCandidate[]) => ({ llm: rows.filter(row => row.
 /** Already verified, unique IDs only. This chooses a pool, not the final ranking. */
 export function selectVerifiedCandidates(candidates: MovieCandidate[], history: HistoryRow[]) {
   const evidence = examplePool(history, emptyProfile, new Map());
-  const high = evidence.filter(row => row.example.rating_100 >= 80), low = evidence.filter(row => row.example.rating_100 <= 60);
+  const sample=(r:ExampleSample):SupportSample=>({movie_id:r.example.movie_id,genre_ids:r.genre_ids,directors:r.example.directors.map(p=>p.id)});
+  const historical=historicalSupport(history);
+  const high = [...evidence.filter(row => row.example.rating_100 >= 80).map(sample),...historical.filter(r=>r.sentiment==='liked')], low = [...evidence.filter(row => row.example.rating_100 <= 60).map(sample),...historical.filter(r=>r.sentiment==='disliked')];
   const facts = new Map(candidates.map(row => [row, { support: support(row, high), counterexample: support(row, low) !== 'none' }]));
   const selected: MovieCandidate[] = [];
   const groups = new Map(candidates.map(row => [row, metadataGroup(row)])), represented = new Set<string>();

@@ -1,10 +1,10 @@
+import {historicalEvidenceSchema,evidenceKey,type EvidenceRef,type HistoricalEvidence} from './historical-evidence';
 import type { MovieCandidate } from './candidates';
-import type { Evidence } from './taste-schema';
 import { tmdbImage } from './movie-images';
 
 export const RANKING_LIMITS = { candidates: 40, recommendations: 5, evidence: 6, why_fit: 1000, possible_mismatch: 600, input_bytes: 120000 } as const;
 export type RankingDiagnostic = { stage: 'input' | 'output' | 'final'; index?: number; tmdb_id?: number; reason: string };
-export type Recommendation = { tmdb_id: number; why_fit: string; possible_mismatch: string; evidence: Evidence[] };
+export type Recommendation = { tmdb_id: number; why_fit: string; possible_mismatch: string; evidence: EvidenceRef[] };
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const integer = (value: unknown, minimum = 1, maximum = Number.MAX_SAFE_INTEGER): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum && value <= maximum;
 const text = (value: unknown, maximum = Infinity): value is string => typeof value === 'string' && Boolean(value.trim()) && [...value].length <= maximum;
@@ -46,14 +46,14 @@ export function parseCandidateReport(value: unknown) {
   return { candidates, diagnostics, input_count: value.candidates.length,
     warnings: value.status === 'partial' ? ['Input came from a partial candidate generation; only its verified candidates are considered.'] : [] };
 }
-export function rankingFormat(ids: number[]) {
+export function rankingFormat(ids: number[], historical=false) {
   return { type: 'json_schema', name: 'personal_movie_ranking', strict: true, schema: {
     type: 'object', additionalProperties: false, required: ['recommendations'], properties: { recommendations: {
       type: 'array', minItems: 1, maxItems: RANKING_LIMITS.recommendations, items: {
         type: 'object', additionalProperties: false, required: ['tmdb_id', 'why_fit', 'possible_mismatch', 'evidence'], properties: {
           tmdb_id: { type: 'integer', enum: ids }, why_fit: { type: 'string', minLength: 1, maxLength: RANKING_LIMITS.why_fit },
           possible_mismatch: { type: 'string', minLength: 1, maxLength: RANKING_LIMITS.possible_mismatch }, evidence: {
-            type: 'array', minItems: 1, maxItems: RANKING_LIMITS.evidence, items: { type: 'object', additionalProperties: false,
+            type: 'array', minItems: 1, maxItems: RANKING_LIMITS.evidence, items: historical?{anyOf:[{type:'object',additionalProperties:false,required:['movie_id','rating_100'],properties:{movie_id:{type:'integer',minimum:1},rating_100:{type:'integer',minimum:0,maximum:100}}},historicalEvidenceSchema]}:{ type: 'object', additionalProperties: false,
               required: ['movie_id', 'rating_100'], properties: { movie_id: { type: 'integer', minimum: 1 }, rating_100: { type: 'integer', minimum: 0, maximum: 100 } } },
           },
         },
@@ -61,11 +61,11 @@ export function rankingFormat(ids: number[]) {
     } },
   } };
 }
-export function validateRanking(value: unknown, candidates: MovieCandidate[], snapshot: Evidence[]) {
+export function validateRanking(value: unknown, candidates: MovieCandidate[], snapshot: EvidenceRef[]) {
   if (!object(value) || Object.keys(value).length !== 1 || !Array.isArray(value.recommendations) || !value.recommendations.length || value.recommendations.length > RANKING_LIMITS.recommendations) {
     throw new Error('Invalid ranking response: expected one to five recommendations.');
   }
-  const allowed = new Set(candidates.map(row => row.tmdb_id)), ratings = new Map(snapshot.map(row => [row.movie_id, row.rating_100]));
+  const allowed = new Set(candidates.map(row => row.tmdb_id)), allowedEvidence = new Set(snapshot.map(evidenceKey));
   const recommendations: Recommendation[] = [], diagnostics: RankingDiagnostic[] = [], seen = new Set<number>();
   for (const [index, row] of value.recommendations.entries()) {
     const reject = (reason: string) => diagnostics.push({ stage: 'output', index: index + 1, ...(object(row) && integer(row.tmdb_id) ? { tmdb_id: row.tmdb_id } : {}), reason });
@@ -74,10 +74,14 @@ export function validateRanking(value: unknown, candidates: MovieCandidate[], sn
     if (seen.has(row.tmdb_id)) { reject('duplicate_recommendation'); continue; }
     if (!text(row.why_fit, RANKING_LIMITS.why_fit) || !text(row.possible_mismatch, RANKING_LIMITS.possible_mismatch)) { reject('invalid_explanation'); continue; }
     if (!Array.isArray(row.evidence) || !row.evidence.length || row.evidence.length > RANKING_LIMITS.evidence) { reject('invalid_evidence'); continue; }
-    const evidence: Evidence[] = [], evidenceIds = new Set<number>();
+    const evidence: EvidenceRef[] = [], evidenceIds = new Set<number>();
     for (const ref of row.evidence) {
-      if (!object(ref) || Object.keys(ref).length !== 2 || !integer(ref.movie_id) || !integer(ref.rating_100, 0, 100) || ratings.get(ref.movie_id) !== ref.rating_100 || evidenceIds.has(ref.movie_id)) break;
-      evidence.push({ movie_id: ref.movie_id, rating_100: ref.rating_100 }); evidenceIds.add(ref.movie_id);
+      if(!object(ref)||!integer(ref.movie_id)||evidenceIds.has(ref.movie_id))break;
+      let parsed:EvidenceRef;
+      if(ref.kind==='historical'){if(Object.keys(ref).length!==3||!['liked','disliked','mixed'].includes(String(ref.sentiment)))break;parsed={movie_id:ref.movie_id,kind:'historical',sentiment:ref.sentiment as HistoricalEvidence['sentiment']};}
+      else {if(Object.keys(ref).length!==2||!integer(ref.rating_100,0,100))break;parsed={movie_id:ref.movie_id,rating_100:ref.rating_100};}
+      if(!allowedEvidence.has(evidenceKey(parsed)))break;
+      evidence.push(parsed);evidenceIds.add(ref.movie_id);
     }
     if (evidence.length !== row.evidence.length) { reject('invalid_evidence'); continue; }
     seen.add(row.tmdb_id);

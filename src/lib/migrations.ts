@@ -10,6 +10,8 @@ const migrations = [
   new URL('../../migrations/006_movie_reviews.sql', import.meta.url),
   new URL('../../migrations/007_evaluation.sql', import.meta.url),
   new URL('../../migrations/008_profiles.sql', import.meta.url),
+  new URL('../../migrations/009_legacy_marks.sql', import.meta.url),
+  new URL('../../migrations/010_legacy_identity.sql', import.meta.url),
 ];
 
 export const SCHEMA_VERSION = migrations.length;

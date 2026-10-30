@@ -66,7 +66,7 @@ export function LibraryWorkbench() {
     {editor.notice ? editor.notice.error ? <ErrorState>{editor.notice.text}</ErrorState> : <p className="success-state" role="status">{editor.notice.text}</p> : null}
     {editor.recoveryMovieId !== null ? <Button tone="quiet" type="button" disabled={editor.busy || editor.selecting} onClick={() => { void editor.choose(editor.recoveryMovieId!); collection.refresh(); }}>Перечитать фильм</Button> : null}
   </>;
-  const data = collection.data, active = Boolean(state.q || state.year || state.rated !== 'all' || state.sort !== 'added_desc');
+  const data = collection.data, active = Boolean(state.watchlist || state.q || state.year || state.rated !== 'all' || state.sort !== 'added_desc');
   return <div className="library-workbench">
     <div hidden={movieId !== undefined}>
       <div className="library-heading"><PageHeader title="Моя библиотека" description="Фильмы заканчиваются. Впечатления остаются." /><p className="library-total">{collection.totalError ? <button type="button" onClick={collection.refresh}>Повторить чтение количества</button> : collection.total === null ? 'Читаем коллекцию…' : <><strong>{collection.total}</strong><span>просмотрено</span></>}</p></div>
@@ -113,7 +113,7 @@ export function LibraryToolbar({ state, navigate }: { state: LibraryState; navig
       <Button>Найти</Button>
     </form>
     {error ? <ErrorState>{error}</ErrorState> : null}
-    <div className="library-filter-row"><div className="library-rated" role="group" aria-label="Наличие оценки">{(['all','true','false'] as const).map((rated, i) => <button key={rated} type="button" aria-pressed={state.rated === rated} onClick={() => navigate({ ...state, rated, page: 1 })}>{['Все фильмы','С оценкой','Без оценки'][i]}</button>)}</div>
+    <div className="library-filter-row"><Button tone="quiet" type="button" aria-pressed={!!state.watchlist} onClick={()=>navigate({...state,watchlist:!state.watchlist,page:1})}>Посмотреть</Button><div className="library-rated" role="group" aria-label="Наличие оценки">{(['all','true','false'] as const).map((rated, i) => <button key={rated} type="button" aria-pressed={state.rated === rated} onClick={() => navigate({ ...state, rated, page: 1 })}>{['Все фильмы','С оценкой','Без оценки'][i]}</button>)}</div>
       <label className="library-sort"><span className="sr-only">Сортировка библиотеки</span><select name="library-sort" value={state.sort} onChange={event => navigate({ ...state, sort: event.target.value as LibraryState['sort'], page: 1 })}>{Object.entries(librarySorts).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     </div>
   </div>;

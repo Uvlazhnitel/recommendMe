@@ -19,14 +19,19 @@ export function MovieEditor({ model: m, enhanced = false, collection = false, he
       {enhanced && film.genres?.length ? <p className="editor-genres">{film.genres.map(genre => genre.name).join(' · ')}</p> : null}
       {collection && film.directors?.length ? <p className="muted">{film.directors.map(person => person.name).join(', ')}</p> : null}
       <p className="watch-status">{film.watched ? 'Уже просмотрен' : enhanced ? 'Не просмотрен' : 'Просмотр не отмечен'}</p>
+      {film.legacy_marks?.map((mark,index)=><p className="muted" key={index}>Отметка из старого списка: {mark.sentiment==='liked'?'понравилось':mark.sentiment==='disliked'?'не понравилось':mark.sentiment==='mixed'?'смешанно':'отношение неизвестно'}{mark.superseded?' · заменена личной оценкой':''}</p>)}
       <p className="current-score">{enhanced ? <span>Сохранено: </span> : null}{film.rating_100 === null ? 'Без оценки' : <><strong>{film.rating_100}</strong><span> / 100</span></>}</p>
       <p className="muted">{film.rating_source === 'letterboxd' ? 'Оценка из Letterboxd' : film.rating_source === 'manual' ? 'Ваша оценка' : 'Оценка ещё не назначена'}</p>
+    {film.legacy_unconfirmed?<details><summary>Об источнике</summary><p className="muted">Название и год сохранены из старого списка. Совпадение с каталогом пока не подтверждено.</p></details>:null}
+    {film.external_ratings?.map((r,i)=><p className="muted" key={i}>Внешний рейтинг: {r.raw} · {r.source??'Источник неизвестен'}</p>)}
+    {film.watchlist!==undefined?<Button tone="quiet" type="button" disabled={m.busy} onClick={m.toggleWatchlist}>{film.watchlist?'Убрать из «Посмотреть»':'Добавить в «Посмотреть»'}</Button>:null}
     </div>
   </div>;
   const ratingFields = enhanced ? <RatingControl value={m.score} onChange={m.setScore} watched={film.watched} /> :
     <label>{film.watched ? 'Новая оценка' : <>Оценка просмотра <span className="muted">(необязательно)</span></>}<span className="input-with-suffix"><input name={film.watched ? 'edit-rating' : 'watch-rating'} type="number" min={0} max={100} step={1} required={film.watched} value={m.score} onChange={e => m.setScore(e.target.value)} /><span>/ 100</span></span></label>;
   return <section className={`movie-editor ${enhanced ? 'rate-editor' : ''}${collection ? ' library-editor' : ''}`} aria-label="Выбранный фильм" aria-busy={m.busy}>
     {posterAndTitle}
+
     {!enhanced && film.overview ? <p className="film-overview">{film.overview}</p> : null}
     <fieldset disabled={m.busy}>
       <legend className="sr-only">Просмотр и оценка {film.title}</legend>

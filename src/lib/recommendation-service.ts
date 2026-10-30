@@ -1,4 +1,4 @@
-import { readCandidateHistory } from './candidate-context';
+import {currentEvidence} from './historical-evidence';
 import { userId as validUserId } from './profiles';
 import { requireProfileSchema } from './profiles';
 import { personalScope, type UserId } from './profiles';
@@ -27,9 +27,9 @@ function readiness(db: Database.Database, userId: UserId, config: { apiKey?: str
   personalScope(db, userId);
   const settings = Boolean(config.apiKey?.trim() && config.model?.trim() && config.tmdbKey?.trim());
   try {
-    if (!readCandidateHistory(db,userId).some(row=>row.rating_100!==null)) return { can_generate:false,reason:'ratings_missing',profile_refresh:null };
+    if (!currentEvidence(db,userId).length) return { can_generate:false,reason:'ratings_missing',profile_refresh:null };
     const personal = prepareTasteInputs(db, userId);
-    return { can_generate: settings && personal.rated.length > 0, reason: !settings ? 'configuration_missing' : !personal.rated.length ? 'ratings_missing' : null,
+    return { can_generate: settings && (personal.rated.length+personal.historical.length)>0, reason: !settings ? 'configuration_missing' : !(personal.rated.length+personal.historical.length) ? 'ratings_missing' : null,
       profile_refresh: { status: personal.profileRefresh.status, total_changes: personal.profileRefresh.total_changes, review_changes: personal.profileRefresh.review_changes, total_feedback_changes: personal.profileRefresh.total_feedback_changes, threshold: personal.profileRefresh.threshold } };
   } catch {
     return { can_generate: false, reason: 'profile_unavailable', profile_refresh: null };
