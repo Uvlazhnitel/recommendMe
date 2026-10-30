@@ -1,5 +1,16 @@
 # recommendMe: изолированное развёртывание на homeserver
 
+## Исправление исторического профиля — release 860e783, 2026-10-30
+
+Текущий runtime `860e7834bea1238639f07e4fc4a30fc30265947a`, образ `recommendme:historical-prompt-860e783`, ID `sha256:6beb509ce6d78dd05a2ceaa87af83143607f8dbe0ada7c22c68725330e3278b5`, healthy. SQLite остаётся schema10, рабочий data mount — прежний `$HOME/apps/recommendme/data-historical-56113c7` → `/app/data`. Миграций/импорта нет. Изменён только исторический prompt профиля; валидатор и рекомендации прежние.
+
+Свежий pre-deploy backup: `$HOME/apps/recommendme/backups/snapshot-2026-10-30T19-19-08.594Z-23e2c1fe-66f1-4fbb-8f89-e4d211151c8f`; verify/restore/independent Mac verify и offline/live smoke прошли с точным сохранением всех прежних таблиц/journal. Старый образ historical-56113c7 и source-before-historical-prompt-860e783 сохранены; config/RUNBOOK — в приватном deploy-profile-860e783-Grc92N/. Runtime.env/ключи/модель, data/network/security не менялись. Для rollback вернуть прежние image/source/config с той же SQLite10; новые данные не перезаписывать старым backup.
+
+По отдельно разрешённой единственной попытке создан реальный профиль Валерия: v1/profile schema2,177 исторических свидетельств,0 личных числовых оценок,8 выводов (5 positive/2 negative/1 mixed). Штатная валидация/транзакция и чтение приложением прошли; readiness.can_generate=true/profile_refresh=current. Все персональные данные/профиль/подборки/журналы Ильи неизменны, integrity OK/FK0, locks0. Backup перед сохранением профиля: `backups/before-taste-valeriy-15e60d06-341a-4dd5-baf9-959a41072e07.sqlite`, проверен по всем таблицам.
+
+OpenAI1/TMDB0 в этой задаче, gpt-6.1-sol/default: input11347/output2273/total13620, расчётно $0.051096 с cache writes. Приватный профиль и usage — в deploy-profile-860e783-Grc92N/. Кандидаты и подборка не генерировались. Приложение оставлено работающим; первая подборка — отдельное разрешение.
+
+
 ## История Валерия — DEPLOYED, 2026-10-30
 
 Текущий release `56113c7f5270473536e9970493b7a9421d8e849a`, образ `recommendme:historical-56113c7`, ID `sha256:f5a8b85f23e21ca4953ac70bcbf8497dedbdd46905b41d3b3dbd40179e858348`; runtime SHA совпал, healthy, SQLite schema 10. Адрес прежний: https://homeserver.tail25398e.ts.net:12443/ (частный Tailscale). Ниже сохранены исторические записи предыдущих release.
