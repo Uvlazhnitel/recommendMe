@@ -1,5 +1,10 @@
 # Personal Movie Recommender
 
+## Два локальных профиля — текущее решение
+
+Илья и Валерий выбирают независимые профили без паролей; выбор не является авторизацией. Каталог фильмов общий, оценки, впечатления, подборки, журналы и Evaluation принадлежат выбранному профилю. История схемы 7 при явной миграции назначается Илье, Валерий начинает с пустыми данными. Персональные CLI-команды требуют `--user ilya` или `--user valeriy`. Схема 8 применяется только явной обслуживающей операцией `npm run db:init -- --offline` после остановки записей и проверенного backup; чтение и запуск приложения её не мигрируют. Развёртывание и перенос реальной базы требуют отдельной приёмки.
+
+
 Личное веб-приложение для рекомендаций полнометражного кино по истории оценок владельца. Цель будущего рекомендателя — находить фильмы с личной оценкой 80/100 и выше; это не гарантия результата.
 
 ## Главная v2 — 2026-10-29
@@ -27,11 +32,11 @@
 Офлайн-отчёт собирает реально сохранённые AI-подборки, известные версии и фактический OpenAI usage. Качество определяется только подтверждёнными событиями приложения: рекомендация → подтверждение просмотра → назначение оценки. Один фильм относится к последней сохранённой рекомендации перед просмотром; используется текущая оценка, очистка до NULL делает результат неизвестным. Непросмотренные фильмы не считаются неудачами, старые оценки не превращаются в результаты рекомендаций.
 
 ```sh
-npm run evaluation:report
-npm run --silent evaluation:report -- --json
-npm run evaluation:report -- --from 2026-10-01 --to 2026-10-31
+npm run evaluation:report -- --user ilya
+npm run --silent evaluation:report -- --user ilya --json
+npm run evaluation:report -- --user ilya --from 2026-10-01 --to 2026-10-31
 # Для отдельного существующего readonly снимка:
-DATABASE_PATH=/absolute/path/to/snapshot.sqlite npm run --silent evaluation:report -- --json
+DATABASE_PATH=/absolute/path/to/snapshot.sqlite npm run --silent evaluation:report -- --user ilya --json
 ```
 
 CLI запускается из checkout с установленными dev dependencies (`tsx`), по правилам остальных локальных CLI. В минимальном Docker runtime dev dependencies отсутствуют: для отчёта использовать такой checkout и согласованный приватный снимок либо окружение с Node и зависимостями; новый экран/сервер аналитики не добавлен. Отчёт не создаёт БД и не мигрирует её. Период — сохранённые подборки в UTC (последняя дата включительно), оценки — текущие на момент чтения. При менее20 наблюдений показываются числа и `insufficient_data`;20 не означает статистической надёжности.
@@ -321,9 +326,9 @@ SQLite по умолчанию хранится в `data/movies.sqlite`, отд�
 Личные исходники размещаются в `data/import/watched(6).csv` и `data/import/ratings(6).csv`. Их нет в Git. Команда разработчика для первоначального заполнения:
 
 ```sh
-npm run seed:letterboxd
+npm run seed:letterboxd -- --user ilya
 # Либо указать пути:
-npm run seed:letterboxd -- --watched /path/watched.csv --ratings /path/ratings.csv
+npm run seed:letterboxd -- --user ilya --watched /path/watched.csv --ratings /path/ratings.csv
 ```
 
 Повторный запуск не создаёт дубликаты и не заменяет существующие персональные записи, включая ручные и очищенные оценки. `0` — реальная оценка, `NULL` — отсутствие оценки. Даты двух CSV хранятся отдельно и не считаются подтверждённой датой просмотра.
@@ -349,8 +354,8 @@ npm run tmdb:enrich
 Безопасный сухой прогон, без ключа и платного API:
 
 ```sh
-npm run taste:generate -- --dry-run
-npm run taste:show
+npm run taste:generate -- --user ilya --dry-run
+npm run taste:show -- --user ilya
 ```
 
 Без параметров `taste:generate` тоже выполняет dry-run. Он показывает количество оценок, группы/покрытие метаданными, число подробных примеров и контрастов, размер входа и неточную оценку токенов. `taste:show` читает уже сохранённый профиль и показывает реальные названия из SQLite; в личной базе сохранён профиль v1 на 519 оценках.
@@ -359,9 +364,9 @@ npm run taste:show
 
 ```sh
 # Один платный анализ — только по явному запуску:
-npm run taste:generate -- --live
+npm run taste:generate -- --user ilya --live
 # Явная перегенерация существующего профиля:
-npm run taste:generate -- --live --force
+npm run taste:generate -- --user ilya --live --force
 ```
 
 Обычный live-запуск повторно использует существующий валидный профиль, даже если он устарел. Изменения оценок/контекста показываются как stale, без автоматического расхода токенов; перегенерация требует --force. --dry-run и --live несовместимы, --force без --live запрещён. Приложение и health не вызывают OpenAI.
@@ -380,9 +385,9 @@ npm run taste:generate -- --live --force
 
 ```sh
 # Без API-вызовов и изменений SQLite; без флагов также dry-run:
-npm run candidates:generate -- --dry-run
+npm run candidates:generate -- --user ilya --dry-run
 # Платная генерация — только явным запуском, после отдельного создания профиля:
-npm run candidates:generate -- --live
+npm run candidates:generate -- --user ilya --live
 ```
 
 Нужен валидный сохранённый AI-профиль; сейчас профиль v1 доступен. Если профиля нет, dry-run завершится с кодом 1 без автогенерации. Dry-run показывает готовность OPENAI_API_KEY/OPENAI_MODEL/TMDB_API_KEY, состояние профиля, число изменений оценок, примеров и контрастов, размер контекста, приблизительное число токенов и лимиты. Ключи не выводятся. --dry-run и --live несовместимы; других режимов нет.
@@ -403,9 +408,9 @@ CLI открывает SQLite **только для чтения**, не при�
 
 ```sh
 # Нужны уже сохранённые кандидаты и профиль; без флага также dry-run:
-npm run recommendations:rank -- --input data/candidates.json --dry-run
+npm run recommendations:rank -- --user ilya --input data/candidates.json --dry-run
 # Один платный отбор — только явным запуском владельца:
-npm run recommendations:rank -- --input data/candidates.json --live
+npm run recommendations:rank -- --user ilya --input data/candidates.json --live
 ```
 
 Ранжирование не создаёт профиль и не запускает поиск кандидатов. Без --save оно читает SQLite в read-only режиме и принимает сохранённый JSON-результат 2.2: mode=live, status=ok/partial, максимум 40 уникальных TMDB ID. Partial-вход допускается с предупреждением. В MovieCandidate добавлено явное media_type=movie; файлы без него требуют нового вывода генератора, тип фильма не угадывается. Невалидные записи, TV/короткий метр, неизвестная длительность, просмотренные и скрытые исключаются до API с диагностикой. Повторные входные ID, более 40 записей и повреждённый JSON прекращают запуск.
@@ -433,12 +438,12 @@ Live делает ровно один Responses-запрос существую�
 ## Память рекомендаций — подфаза 2.4
 
 ```sh
-npm run recommendations:history
-npm run taste:status
+npm run recommendations:history -- --user ilya
+npm run taste:status -- --user ilya
 # Существующий read-only режим, один платный отбор:
-npm run recommendations:rank -- --input data/candidates.json --live
+npm run recommendations:rank -- --user ilya --input data/candidates.json --live
 # Один платный отбор с явной записью успешных результатов:
-npm run recommendations:rank -- --input data/candidates.json --live --save
+npm run recommendations:rank -- --user ilya --input data/candidates.json --live --save
 ```
 
 Без --save прежнее read-only поведение сохраняется. --save разрешён только вместе с явным --live; dry-run никогда не записывает базу. Новые записывающие команды создают уникальный SQLite backup рядом с базой в backups/ (по умолчанию data/backups/). Для live --save backup выполняется до OpenAI: при его ошибке токены не расходуются. Неприменённые миграции (включая 4/5) в самостоятельном CLI применяются после успешного ранжирования либо при явной записи/отклонении; HTTP-конвейер 4.2 мигрирует после backup до платных этапов. Обычное чтение работает на схемах 3–5.
@@ -454,8 +459,8 @@ npm run recommendations:rank -- --input data/candidates.json --live --save
 Предварительный просмотр (он же режим по умолчанию):
 
 ```sh
-npm run recommendations:record -- --input data/candidates.json --tmdb-ids 13398,107985,840430,698948,24128 --dry-run
-npm run recommendations:record -- --input data/candidates-round2.json --tmdb-ids 10386,445571,500664,24238,3482 --dry-run
+npm run recommendations:record -- --user ilya --input data/candidates.json --tmdb-ids 13398,107985,840430,698948,24128 --dry-run
+npm run recommendations:record -- --user ilya --input data/candidates-round2.json --tmdb-ids 10386,445571,500664,24238,3482 --dry-run
 ```
 
 Для записи владелец заменяет --dry-run на --save. **Эти десять фильмов в рабочую базу автоматически не вносились.** Каждый ID должен присутствовать в валидированном файле кандидатов; сетевых запросов нет. Стабильный ключ из отсортированного набора ID делает повтор безопасным. Старые объяснения отсутствуют, поэтому сохраняются NULL; дата обозначает момент явного внесения, а не неизвестное точное время первоначального показа.
@@ -465,8 +470,8 @@ npm run recommendations:record -- --input data/candidates-round2.json --tmdb-ids
 ```sh
 # При сохранении stdout платного запуска использовать npm run --silent:
 # npm run --silent recommendations:rank -- --input data/candidates.json --live --save > data/ranking.json
-npm run recommendations:record -- --input data/candidates.json --result data/ranking.json --dry-run
-npm run recommendations:record -- --input data/candidates.json --result data/ranking.json --save
+npm run recommendations:record -- --user ilya --input data/candidates.json --result data/ranking.json --dry-run
+npm run recommendations:record -- --user ilya --input data/candidates.json --result data/ranking.json --save
 ```
 
 --result и --tmdb-ids несовместимы. Исходные объяснения и result_id сохраняются; для старого результата без UUID используется стабильный хеш содержимого. Ошибка/пустой результат не записываются, ID и текущие свидетельства проверяются заново. --save и --dry-run несовместимы. Файлы, база и backup игнорируются Git.
@@ -474,8 +479,8 @@ npm run recommendations:record -- --input data/candidates.json --result data/ran
 ### «Неинтересно» и отмена
 
 ```sh
-npm run recommendations:reject -- --tmdb-id 13398
-npm run recommendations:reject -- --tmdb-id 13398 --undo
+npm run recommendations:reject -- --user ilya --tmdb-id 13398
+npm run recommendations:reject -- --user ilya --tmdb-id 13398 --undo
 ```
 
 Команда работает только для известного локального фильма; если его нет, сначала явно внести проверенный показ через record. Одной транзакцией not_interested=1 устанавливается в user_movies, а у связанных показов rejected=1. Если персональной строки нет, она создаётся с watched=0, rating_100=NULL, rating_source=none. Существующие оценки/звёзды/просмотр не меняются, нулевая оценка не создаётся. Повторное отклонение безопасно.
@@ -486,7 +491,7 @@ npm run recommendations:reject -- --tmdb-id 13398 --undo
 
 `taste:status` читает существующее сравнение с ratings_snapshot: added/changed/cleared, total_changes, threshold=10, статус current/stale/refresh_recommended и явную команду обновления. Каждый фильм считается один раз по итоговому состоянию. NULL→0, изменение старой оценки и очистка учитываются; возврат к исходной оценке убирает отличие. Просмотр без оценки, сохранение рекомендации и not_interested не становятся отрицательной оценкой и не увеличивают счётчик. Изменение отпечатка без дельт также показывает stale.
 
-При ≥10 отличиях рекомендуется `npm run taste:generate -- --live --force`. Эта команда остаётся отдельным явным платным действием, никогда не запускается автоматически. В сводках кандидатов и ранжирования добавлен profile_refresh; прежние cache/profile_status сохранены. Новые оценки продолжают поступать в следующий запрос независимо от полного пересчёта профиля.
+При ≥10 отличиях рекомендуется `npm run taste:generate -- --user ilya --live --force`. Эта команда остаётся отдельным явным платным действием, никогда не запускается автоматически. В сводках кандидатов и ранжирования добавлен profile_refresh; прежние cache/profile_status сохранены. Новые оценки продолжают поступать в следующий запрос независимо от полного пересчёта профиля.
 
 На 2026-10-26: профиль current, изменений 0, рабочая история рекомендаций пуста, схема остаётся 3 до явной записи. На временной копии проверены обе реальные подборки: 10 вставок, повтор — 0 новых, прежние данные/профиль сохранены. Аудит 2.5 описан ниже; серверный каталог 3.1 описан в разделе поиска.
 
