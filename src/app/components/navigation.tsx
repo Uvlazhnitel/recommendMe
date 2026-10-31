@@ -7,6 +7,7 @@ import { Icon } from './icons';
 const destinations = [
   { href: '/', label: 'Рекомендации', icon: 'home' },
   { href: '/rate', label: 'Оценить фильм', icon: 'star' },
+  { href: '/watchlist', label: 'Посмотреть позже', icon: 'bookmark' },
   { href: '/library', label: 'Библиотека', icon: 'library' },
 ] as const;
 

@@ -1,6 +1,7 @@
 import { profileFetch } from './profile-requests';
 export type Match = { movie_id: number; title: string; year: number | null };
 const errors: Record<string, string> = {
+  invalid_watchlist: 'Не удалось изменить список: некорректные данные.', watchlist_unavailable: 'Список не изменён. Проверьте связь и повторите попытку.',
   invalid_search: 'Введите название (до 200 символов) и корректный год.', tmdb_unavailable: 'TMDB недоступен. Повторите поиск позже.',
   movie_not_found: 'Фильм не найден.', possible_duplicate: 'Возможно, фильм уже есть в старой истории. Автоматическое объединение не выполнено.',
   invalid_tmdb_id: 'Некорректный идентификатор TMDB.', invalid_movie_id: 'Некорректный локальный идентификатор.',

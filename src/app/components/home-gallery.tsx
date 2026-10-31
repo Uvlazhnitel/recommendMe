@@ -6,6 +6,7 @@ import type { RecommendationBatch, RecommendationMovie } from '@/lib/recommendat
 import type { readHomeSummary } from '@/lib/home-summary';
 import { Icon } from './icons';
 import { MoviePoster } from './movie-poster';
+import { useWatchlist } from '../use-watchlist';
 import { Button, EmptyState } from './ui';
 
 export function trapDialogFocus(event: KeyboardEvent<HTMLDialogElement>) {
@@ -22,11 +23,17 @@ export function HomeGallery({ batch, busy, onWatch, onReject, error = '' }: {
   const dialog = useRef<HTMLDialogElement>(null), trigger = useRef<HTMLButtonElement | null>(null);
   const [selected, setSelected] = useState<RecommendationMovie | null>(null);
   const movies = batch?.movies ?? [];
+  const watchlist = useWatchlist();
+  function saveButton(movie: RecommendationMovie) {
+    const saved = watchlist.items.some(item => item.movie_id === movie.movie_id);
+    return <Button className="gallery-watchlist" tone="quiet" disabled={watchlist.loading || watchlist.pending || saved} onClick={event => { event.stopPropagation(); void watchlist.save(movie.movie_id, true); }}><Icon name={saved ? 'check' : 'bookmark'} />{saved ? '✓ В списке' : 'Посмотреть позже'}</Button>;
+  }
   function open(movie: RecommendationMovie, button: HTMLButtonElement) {
     trigger.current = button; setSelected(movie); dialog.current?.showModal();
   }
   function close() { dialog.current?.close(); }
   return <section className="home-results" aria-label="Фильмы подборки" aria-busy={busy}>
+    {watchlist.error ? <p className="error-state" role="alert">{watchlist.error}<Button tone="quiet" disabled={watchlist.pending} onClick={() => void watchlist.refresh()}>Обновить список</Button></p> : null}
     {batch && batch.total_count < 5 && movies.length > 0 ? <p className="home-short-batch">Подборка получилась короче пяти фильмов. Строгие ограничения не ослаблялись.</p> : null}
     {movies.length ? <ul className="recommendation-grid">{movies.map(movie => <li key={movie.tmdb_id}>
       <article className="gallery-card" aria-label={`Рекомендация: ${movie.title}`}>
@@ -36,6 +43,7 @@ export function HomeGallery({ batch, busy, onWatch, onReject, error = '' }: {
             <span className="gallery-details"><span className="gallery-details-desktop">Почему этот фильм</span><span className="gallery-details-mobile">Подробнее</span> <Icon name="arrow-up-right" /></span>
           </span>
         </button>
+        {saveButton(movie)}
       </article>
     </li>)}</ul> : <EmptyState title={batch ? 'Эту подборку ты уже разобрал' : 'Найдём кино для твоего вечера'}>
       <p>{batch ? 'Можно выбрать другое настроение и найти что-то новое' : 'Нажми «Новая подборка», выбери настроение и пожелания. Здесь появятся персональные рекомендации.'}</p>
@@ -48,8 +56,8 @@ export function HomeGallery({ batch, busy, onWatch, onReject, error = '' }: {
         <p className="gallery-genres">{selected.genres.join(' · ')}</p>
         <section><h3>Почему мне понравится</h3><p>{selected.why_fit}</p></section>
         <section className="possible-mismatch"><h3>Что может не подойти</h3><p>{selected.possible_mismatch}</p></section>
-        {error ? <p className="explanation-error" role="alert">{error}</p> : null}
-        <div className="movie-actions"><Button tone="light" disabled={busy} onClick={() => { close(); onWatch(selected); }}>Посмотрел</Button>
+        {error || watchlist.error ? <p className="explanation-error" role="alert">{error || watchlist.error}</p> : null}
+        <div className="movie-actions">{saveButton(selected)}<Button tone="light" disabled={busy} onClick={() => { close(); onWatch(selected); }}>Посмотрел</Button>
           <Button tone="quiet" disabled={busy} onClick={async () => { if (await onReject(selected)) close(); }}>Неинтересно</Button></div></> : null}
     </dialog>
   </section>;

@@ -24,7 +24,7 @@ export function MovieEditor({ model: m, enhanced = false, collection = false, he
       <p className="muted">{film.rating_source === 'letterboxd' ? 'Оценка из Letterboxd' : film.rating_source === 'manual' ? 'Ваша оценка' : 'Оценка ещё не назначена'}</p>
     {film.legacy_unconfirmed?<details><summary>Об источнике</summary><p className="muted">Название и год сохранены из старого списка. Совпадение с каталогом пока не подтверждено.</p></details>:null}
     {film.external_ratings?.map((r,i)=><p className="muted" key={i}>Внешний рейтинг: {r.raw} · {r.source??'Источник неизвестен'}</p>)}
-    {film.watchlist!==undefined?<Button tone="quiet" type="button" disabled={m.busy} onClick={m.toggleWatchlist}>{film.watchlist?'Убрать из «Посмотреть»':'Добавить в «Посмотреть»'}</Button>:null}
+    {film.watchlist!==undefined?<Button tone="quiet" type="button" disabled={m.busy} onClick={m.toggleWatchlist}>{film.watchlist?'Убрать из «Посмотреть позже»':'Посмотреть позже'}</Button>:null}
     </div>
   </div>;
   const ratingFields = enhanced ? <RatingControl value={m.score} onChange={m.setScore} watched={film.watched} /> :

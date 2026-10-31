@@ -163,7 +163,7 @@ try {
     measurements.push({kind:'home_gallery',width,columns,card_width:cards[0].width,first_row_bottom:Math.max(...cards.slice(0,columns).map(c=>c.bottom))});
     if(width===1440){assert.ok(cards.every(c=>Math.abs(c.y-cards[0].y)<1));assert.ok(cards.every(c=>c.bottom<=900));}
     if(width<768){const nav=await page.locator('.navigation').boundingBox();assert.ok(cards.slice(0,2).every(c=>c.bottom<=nav.y),'first row fully visible above navigation');}
-    assert.equal(await page.locator('.gallery-card button').count(),5);assert.equal(await page.locator('.gallery-excerpt').count(),0);assert.equal(await page.locator('.favorite-card').count(),4);await screenshot(`home-5-${width}`,true);}
+    assert.equal(await page.locator('.gallery-card .gallery-open').count(),5);assert.equal(await page.locator('.gallery-excerpt').count(),0);assert.equal(await page.locator('.favorite-card').count(),4);await screenshot(`home-5-${width}`,true);}
   for(const [width,columns] of [[320,1],[1280,5]]){await page.setViewportSize({width,height:900});assert.equal(await page.locator('.recommendation-grid').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),columns);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
   await page.setViewportSize({width:1440,height:1000});
   await openMovie(first.batch.movies[0].title);const originalText=first.batch.movies[0].why_fit;assert.equal(await page.locator('.movie-explanation section').first().locator('p').innerText(),originalText);
@@ -184,6 +184,23 @@ try {
   const mobileCapture=await browser.newContext({viewport:{width:375,height:1000}}),mobilePage=await mobileCapture.newPage();
   await mobilePage.goto(base+'/');await chooseIlya(mobilePage);await mobilePage.evaluate(()=>document.fonts.ready);await mobilePage.screenshot({path:join(output,'recommendations-mobile.png')});await mobileCapture.close();await openMovie(first.batch.movies[1].title);await page.keyboard.press('Escape');assert.equal(openaiCalls(),2);
   const replay=await http.post(base+'/api/recommendations/generate',{data:firstRequest});assert.equal(replay.status(),200);assert.equal(openaiCalls(),2);check('two mocked OpenAI stages; double click/concurrent POST/reload/replay never pay again');
+  const savedForLater = first.batch.movies[3];
+  await openMovie(savedForLater.title);
+  await page.route(`**/api/library/${savedForLater.movie_id}/watchlist`,route=>fulfill(route,{status:503,json:{error:'watchlist_unavailable'}}));
+  await page.locator('.movie-explanation').getByRole('button',{name:'Посмотреть позже',exact:true}).click();
+  await page.locator('.movie-explanation [role="alert"]').waitFor();
+  assert.equal(database(db=>db.prepare("SELECT watchlist FROM user_movies WHERE user_id='ilya' AND movie_id=?").get(savedForLater.movie_id)?.watchlist??0),0);
+  await page.unrouteAll({behavior:'wait'});await page.keyboard.press('Escape');
+  let watchlistWrites = 0;
+  const countWatchlistWrite = request => { if (request.method() === 'PATCH' && request.url().endsWith('/watchlist')) watchlistWrites++; };
+  page.on('request', countWatchlistWrite);
+  const saveCard = page.locator('.gallery-card').filter({hasText:savedForLater.title});
+  await until(()=>saveCard.getByRole('button',{name:'Посмотреть позже',exact:true}).isEnabled(),'watchlist loaded');
+  await saveCard.getByRole('button',{name:'Посмотреть позже',exact:true}).evaluate(button=>{button.click();button.click();button.click();});
+  await saveCard.getByRole('button',{name:'✓ В списке',exact:true}).waitFor();
+  assert.equal(watchlistWrites,1); assert.equal(await page.locator('.movie-explanation').isVisible(),false);
+  await page.reload();await page.locator('.gallery-card').filter({hasText:savedForLater.title}).getByRole('button',{name:'✓ В списке',exact:true}).waitFor();
+  page.off('request',countWatchlistWrite);check('watchlist: direct card save, triple click sends one PATCH, no modal; reload restores membership');
   const rejection=first.batch.movies[4];await openMovie(rejection.title);await page.getByRole('button',{name:'Неинтересно',exact:true}).click();
   await until(async()=> (await state()).batch.movies.length===4,'rejection removes active film');
   database(db=>{const row=db.prepare("SELECT watched,rating_100,not_interested FROM user_movies WHERE user_id='ilya' AND movie_id=?").get(rejection.movie_id);assert.deepEqual(row,{watched:0,rating_100:null,not_interested:1});});
@@ -252,6 +269,10 @@ try {
   check('provider error, malformed/refused output and no candidates preserve previous batch without automatic retry');
   control({round:2,delay:600});const beforeNew=openaiCalls();await dialogOpen();const secondResponse=page.waitForResponse(r=>r.url()===base+'/api/recommendations/generate'&&r.request().method()==='POST');await page.getByRole('button',{name:'Да, подобрать'}).click();await page.locator('.selection-loading').waitFor();assert.ok(await page.locator('.recommendation-grid').isVisible());assert.equal((await secondResponse).status(),201);await page.getByRole('status').filter({hasText:'Новая подборка сохранена.'}).waitFor();assert.equal(openaiCalls(),beforeNew+2);
   const second=(await state()).batch;assert.notEqual(second.result_id,firstId);database(db=>assert.equal(db.prepare("SELECT count(*) n FROM recommendations WHERE user_id='ilya' AND result_id=?").get(firstId).n,5));check('second saved batch preserves first history and keeps previous screen during loading');
+  await go('/watchlist');await page.locator('.watchlist-card').filter({hasText:savedForLater.title}).waitFor();
+  database(db=>assert.equal(db.prepare("SELECT watchlist FROM user_movies WHERE user_id='ilya' AND movie_id=?").get(savedForLater.movie_id).watchlist,1));
+  await go('/');check('watchlist: explicitly saved previous film survives actual new mocked batch');
+
   // Fail only the final transaction, after providers and durable preparation succeeded.
   database(db=>db.exec("CREATE TRIGGER qa_fail_save BEFORE INSERT ON recommendations BEGIN SELECT RAISE(ABORT,'qa save failure'); END"));const countBefore=database(db=>db.prepare('SELECT count(*) n FROM movies').get().n);
   await generate({round:3},500);await page.getByRole('button',{name:'Повторить сохранение без нового подбора'}).waitFor();database(db=>{assert.equal(db.prepare('SELECT count(*) n FROM movies').get().n,countBefore);db.exec('DROP TRIGGER qa_fail_save');});
@@ -277,6 +298,42 @@ try {
   const savedExtra=database(db=>db.prepare("SELECT m.id,u.updated_at FROM movies m JOIN user_movies u ON u.movie_id=m.id AND u.user_id='ilya' WHERE tmdb_id=990003").get());
   await saveRating(100);database(db=>assert.equal(db.prepare("SELECT updated_at FROM user_movies WHERE user_id='ilya' AND movie_id=?").get(savedExtra.id).updated_at,savedExtra.updated_at));
   await screenshot('rate-desktop');check('title/year/versions, empty/error TMDB, possible_duplicate, watch 100 and unchanged timestamps');
+  const watchlistPaidBefore = openaiCalls();
+  await go('/watchlist');await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).click();
+  const laterQuery = page.getByRole('textbox',{name:'Название на русском или английском',exact:true});
+  const beforeSearchCount=database(db=>db.prepare('SELECT count(*) n FROM movies').get().n);
+  for(const title of ['Новый русский фильм','New English Film']) {
+    await laterQuery.fill(title);await page.getByRole('button',{name:'Найти',exact:true}).click();
+    await page.locator('.watchlist-results li').waitFor();
+    assert.equal(database(db=>db.prepare('SELECT count(*) n FROM movies').get().n),beforeSearchCount+(title==='New English Film'?1:0));
+    await page.locator('.watchlist-results').getByRole('button',{name:'+ В список',exact:true}).click();
+    await page.locator('.watchlist-results').getByRole('button',{name:'✓ В списке',exact:true}).waitFor();
+  }
+  await laterQuery.fill('New English Film');await page.getByRole('button',{name:'Найти',exact:true}).click();
+  await page.locator('.watchlist-results').getByRole('button',{name:'✓ В списке',exact:true}).waitFor();
+  assert.equal(database(db=>db.prepare('SELECT count(*) n FROM movies').get().n),beforeSearchCount+2);
+  await laterQuery.fill('duplicate');await page.getByRole('button',{name:'Найти',exact:true}).click();
+  await page.locator('.watchlist-results').getByRole('button',{name:'+ В список',exact:true}).click();
+  await page.getByRole('region',{name:'Возможные совпадения',exact:true}).waitFor();
+  assert.equal(database(db=>db.prepare('SELECT count(*) n FROM movies').get().n),beforeSearchCount+2);
+  check('watchlist: Russian/English search is read-only, new movies added, existing ID reused, legacy duplicate shown');
+  const personalBefore=database(db=>db.prepare("SELECT * FROM user_movies WHERE user_id='ilya' AND movie_id=1").get());
+  await go('/library?movie_id=1');await rating().waitFor();
+  await page.getByRole('button',{name:'Посмотреть позже',exact:true}).click();
+  await page.getByRole('button',{name:'Убрать из «Посмотреть позже»',exact:true}).waitFor();
+  const personalAfter=database(db=>db.prepare("SELECT * FROM user_movies WHERE user_id='ilya' AND movie_id=1").get());
+  for(const key of Object.keys(personalBefore).filter(key=>!['watchlist','updated_at'].includes(key)))assert.deepEqual(personalAfter[key],personalBefore[key],key);
+  await go('/watchlist');await page.locator('.watchlist-card').filter({hasText:'Favourite'}).waitFor();
+  for(const width of [375,430,768,1440]) { await page.setViewportSize({width,height:1000});await screenshot(`watchlist-${width}`,true);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)); }
+  await page.locator('.watchlist-card').filter({hasText:'Favourite'}).getByRole('button',{name:'Убрать из списка',exact:true}).click();
+  await until(async()=>await page.locator('.watchlist-card').filter({hasText:'Favourite'}).count()===0,'removed watched film');
+  assert.equal(database(db=>db.prepare("SELECT watched FROM user_movies WHERE user_id='ilya' AND movie_id=1").get().watched),1);
+  await page.getByRole('button',{name:'Сменить профиль: Илья',exact:true}).click();await page.getByRole('button',{name:'Валерий',exact:true}).click();
+  await go('/watchlist');await page.getByRole('heading',{name:'Пока ничего не отложено',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Сменить профиль: Валерий',exact:true}).click();await page.getByRole('button',{name:'Илья',exact:true}).click();
+  await go('/watchlist');await page.locator('.watchlist-card').filter({hasText:savedForLater.title}).waitFor();
+  assert.equal(openaiCalls(),watchlistPaidBefore);check('watchlist: rated movie fields preserved; explicit removal keeps library; profiles isolated; 4 widths; zero AI');
+  await page.setViewportSize({width:1440,height:1000});
   // Ten final differences from the snapshot: no automatic profile generation.
   database(db=>{for(let id=4;id<14;id++)db.prepare("UPDATE user_movies SET rating_100=100,rating_source='manual' WHERE user_id='ilya' AND movie_id=?").run(id);});
   const countAtRefresh=openaiCalls();assert.equal((await state()).readiness.profile_refresh.status,'refresh_recommended');await go('/');await page.getByText('О подборке',{exact:true}).click();await page.getByText('Профиль вкуса стоит обновить.',{exact:false}).waitFor();assert.equal(openaiCalls(),countAtRefresh);check('ten rating differences recommend refresh without regenerating profile');
@@ -402,14 +459,14 @@ try {
     await page.getByText('Отметка из старого списка: '+(id===1?'понравилось':'не понравилось'),{exact:true}).waitFor();
     await page.getByText('Внешний рейтинг: 9.1 · Источник неизвестен',{exact:true}).waitFor();
     assert.equal(await rating().inputValue(),'');await saveRating(0);await page.getByText(/Отметка из старого списка:.*заменена личной оценкой/).waitFor();await saveRating(75);await clearRating();await page.getByText(/Отметка из старого списка:.*заменена личной оценкой/).waitFor();
-    await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Посмотреть позже',exact:true}).click();await page.getByRole('button',{name:'Убрать из «Посмотреть позже»',exact:true}).waitFor();
     database(db=>{const row=db.prepare("SELECT watched,rating_100,watchlist FROM user_movies WHERE user_id='valeriy' AND movie_id=?").get(id);assert.deepEqual(row,{watched:1,rating_100:null,watchlist:1});assert.equal(db.prepare("SELECT numeric_override FROM legacy_movie_marks WHERE user_id='valeriy' AND movie_id=?").get(id).numeric_override,1);});
-    await screenshot(`legacy-editor-${width}`,true);await go('/library?watchlist=true');await libraryReady();assert.equal(await page.locator('.library-grid>li').count(),1);await go(`/library?movie_id=${id}`);await rating().waitFor();await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).waitFor();
+    await screenshot(`legacy-editor-${width}`,true);await go('/library?watchlist=true');await libraryReady();assert.equal(await page.locator('.library-grid>li').count(),1);await go(`/library?movie_id=${id}`);await rating().waitFor();await page.getByRole('button',{name:'Убрать из «Посмотреть позже»',exact:true}).click();await page.getByRole('button',{name:'Посмотреть позже',exact:true}).waitFor();
     assert.equal((await(await http.get(base+'/api/library?watchlist=true')).json()).total,0);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   }
-  await go('/rate?movie_id=3');await rating().waitFor();await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).waitFor();
+  await go('/rate?movie_id=3');await rating().waitFor();await page.getByRole('button',{name:'Посмотреть позже',exact:true}).click();await page.getByRole('button',{name:'Убрать из «Посмотреть позже»',exact:true}).waitFor();
   database(db=>assert.deepEqual(db.prepare("SELECT watched,rating_100,watchlist FROM user_movies WHERE user_id='valeriy' AND movie_id=3").get(),{watched:0,rating_100:null,watchlist:1}));
-  await page.getByRole('button',{name:'Убрать из «Посмотреть»',exact:true}).click();await page.getByRole('button',{name:'Добавить в «Посмотреть»',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Убрать из «Посмотреть позже»',exact:true}).click();await page.getByRole('button',{name:'Посмотреть позже',exact:true}).waitFor();
   assert.equal(openaiCalls(),historicalCalls);check('historical marks desktop/mobile: external ratings labelled, 0/edit/clear supersedes history, independent watchlist; zero paid calls');
   assert.equal(errors.length,0,errors.join('\n'));report.mock_calls={openai:openaiCalls(),tmdb:calls('api.themoviedb.org')};report.status='passed';
 } catch(error) {

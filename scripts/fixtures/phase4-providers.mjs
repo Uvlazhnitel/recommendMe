@@ -10,7 +10,7 @@ const settings = () => JSON.parse(readFileSync(process.env.PHASE4_CONTROL, 'utf8
 const identity = movie => ({ id: movie.tmdb_id, title: movie.title, original_title: movie.title,
   release_date: `${movie.year}-01-01`, poster_path: movie.poster_path ?? null });
 const synthetic = (id, title, year = 2000) => ({ tmdb_id: id, title, year, runtime: 100, genres: [{ id: 18, name: 'Drama' }] });
-const extras = [synthetic(990001,'QA Similar Film',2019),synthetic(990002,'QA Similar Film',2020),synthetic(990003,'QA New Film'),synthetic(990004,'Legacy Duplicate')];
+const extras = [synthetic(990001,'QA Similar Film',2019),synthetic(990002,'QA Similar Film',2020),synthetic(990003,'QA New Film'),synthetic(990004,'Legacy Duplicate'),synthetic(990005,'Новый русский фильм'),synthetic(990006,'New English Film')];
 function available(control) {
   return control.round === 1 ? sources : Array.from({ length: 5 }, (_, index) => synthetic(900000 + control.round * 100 + index, `QA Feature ${control.round}-${index}`));
 }
