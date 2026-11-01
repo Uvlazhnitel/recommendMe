@@ -499,8 +499,11 @@ html:has(.library-workbench) { scroll-padding-bottom: calc(var(--nav-height) + e
 .home-v2-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
 .home-v2-heading h1 { font-size: clamp(32px, 4vw, 52px); line-height: 1.12; }
 .home-batch-label { color: var(--color-muted); font-size: 16px; margin-top: 8px; }
-.home-v2-heading > .button { flex-shrink: 0; font-size: 16px; min-height: 48px; }
-.home-v2-heading > .button > svg { width: 22px; height: 22px; }
+.home-selection-actions { flex-shrink: 0; }
+.home-selection-buttons { display: flex; gap: 12px; }
+.home-selection-buttons .button { font-size: 16px; min-height: 48px; }
+.home-selection-buttons .button > svg { width: 22px; height: 22px; }
+.home-selection-note { color: var(--color-muted); font-size: 12px; margin-top: 8px; text-align: right; }
 .recommendation-grid, .favorites-grid { list-style: none; padding: 0; margin: 0; display: grid; }
 .recommendation-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 20px; }
 .recommendation-grid > li { min-width: 0; }
@@ -586,9 +589,6 @@ body:has(.home-v2 dialog[open]) { overflow: hidden; }
 .selection-dialog-actions { padding: 20px 28px 24px; flex-shrink: 0; background: var(--color-surface); border-top: var(--border); margin-top: 16px; }
 .selection-dialog-actions > .button { width: 100%; min-height: 48px; font-size: 16px; }
 .selection-dialog-actions > p { font-size: 12px; color: var(--color-muted); margin-top: 8px; text-align: center; }
-.selection-confirm-actions { display: flex; gap: 12px; }
-.selection-confirm-actions .button { flex: 1; }
-.confirmation-wishes { color: var(--color-accent); font-size: 16px; line-height: 1.7; padding-block: 8px 16px; }
 @media (min-width: 1280px) { .recommendation-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 @media (max-width: 1023px) { .favorites-grid { gap: 20px; } .favorite-card { gap: 10px; } .favorite-card .movie-poster { width: 52px; flex-basis: 52px; } .favorite-copy { padding-top: 0; } }
 @media (max-width: 767px) {
@@ -596,7 +596,10 @@ body:has(.home-v2 dialog[open]) { overflow: hidden; }
   .home-v2-heading { display: block; margin-bottom: 24px; }
   .home-v2-heading h1 { font-size: 28px; }
   .home-batch-label { font-size: 14px; margin-top: 8px; }
-  .home-v2-heading > .button { width: 100%; margin-top: 20px; }
+  .home-selection-actions { margin-top: 20px; }
+  .home-selection-buttons { flex-direction: column; }
+  .home-selection-buttons .button { width: 100%; }
+  .home-selection-note { text-align: center; }
   .recommendation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 12px; }
   .gallery-copy { padding-top: 10px; gap: 4px; }
   .gallery-title { font-size: 14px; }
@@ -621,7 +624,6 @@ body:has(.home-v2 dialog[open]) { overflow: hidden; }
   .selection-dialog-heading p { font-size: 14px; }
   .selection-dialog-content { padding: 20px 20px 0; }
   .selection-dialog-actions { padding: 16px 20px calc(20px + env(safe-area-inset-bottom, 0px)); }
-  .selection-confirm-actions { flex-wrap: wrap; }
 }
 @media (max-width: 359px) { .recommendation-grid { grid-template-columns: minmax(0, 1fr); } .selection-moods { grid-template-columns: minmax(0, 1fr); } }
 

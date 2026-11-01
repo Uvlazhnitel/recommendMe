@@ -46,7 +46,7 @@ export function HomeGallery({ batch, busy, onWatch, onReject, error = '' }: {
         {saveButton(movie)}
       </article>
     </li>)}</ul> : <EmptyState title={batch ? 'Эту подборку ты уже разобрал' : 'Найдём кино для твоего вечера'}>
-      <p>{batch ? 'Можно выбрать другое настроение и найти что-то новое' : 'Нажми «Новая подборка», выбери настроение и пожелания. Здесь появятся персональные рекомендации.'}</p>
+      <p>{batch ? 'Нажми «Новая подборка» или задай пожелания в «Настроить подбор».' : 'Нажми «Новая подборка» — здесь появятся персональные рекомендации. Настроение и пожелания можно задать в «Настроить подбор».'}</p>
     </EmptyState>}
     <dialog ref={dialog} className="movie-explanation" aria-labelledby="explanation-title" onKeyDown={trapDialogFocus} onClose={() => {
       if (trigger.current?.isConnected) trigger.current.focus();
