@@ -51,7 +51,7 @@ function summary(row: Row, db: Database.Database) {
   const localized = russianMovie(db, row.tmdb_id);
   const sourceGenres = decode(row.genres_json) as { id: number; name: string }[] | null;
   const displayGenres = hasRussianCache(db) && sourceGenres ? russianGenres(sourceGenres) : sourceGenres;
-  return { ...(row.watchlist==null?{}:{watchlist:row.watchlist===1}),movie_id: row.id, tmdb_id: row.tmdb_id, title: localized?.title ?? row.title, tmdb_title: localized?.title ?? row.tmdb_title, original_title: row.original_title,
+  return { ...(row.watchlist==null?{}:{watchlist:row.watchlist===1}),movie_id: row.id, tmdb_id: row.tmdb_id, title: localized?.title ?? (row.media_type === 'tv' && row.tmdb_title ? row.tmdb_title : row.title), tmdb_title: localized?.title ?? row.tmdb_title, original_title: row.original_title,
     year: row.release_year ?? row.tmdb_release_year, poster_path: row.poster_path, genres: displayGenres, directors: decode(row.directors_json),
     watched: row.watched === 1, rating_100: row.rating_100, review_text: row.review_text ?? null, rating_source: row.rating_source ?? 'none', not_interested: row.not_interested === 1,
     letterboxd_uri: row.letterboxd_uri, original_rating_stars: row.original_rating_stars, letterboxd_date: row.letterboxd_date,

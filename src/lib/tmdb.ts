@@ -77,6 +77,11 @@ export function parseDetails(value: unknown) {
   };
 }
 export type Details = ReturnType<typeof parseDetails>;
+export type RepairWork = { type: 'movie' | 'tv' | 'episode' | 'season'; id: number; details: Details;
+  presentation: { title: string; overview: string | null }; imdb: string | null; titles: string[]; years: number[];
+  showId?: number; season?: number; episode?: number };
+export type RepairHit = { type: 'movie' | 'tv' | 'episode' | 'season'; id: number; showId?: number; season?: number; episode?: number };
+
 
 type Dependencies = { fetch?: typeof fetch; sleep?: (ms: number) => Promise<unknown>; now?: () => number; timeoutMs?: number; maxRequests?: number };
 export function createTmdbClient(apiKey: string | undefined, dependencies: Dependencies = {}) {
@@ -127,6 +132,64 @@ export function createTmdbClient(apiKey: string | undefined, dependencies: Depen
   }
   return {
     stats,
+    async repairFind(imdb: string): Promise<RepairHit[]> {
+      if (!/^tt\d+$/.test(imdb)) throw new TmdbError('Invalid IMDb ID.');
+      const body = object(await request(`/find/${imdb}`, { external_source: 'imdb_id' }));
+      const hits: RepairHit[] = [];
+      for (const [key, type] of [['movie_results','movie'],['tv_results','tv'],['tv_episode_results','episode']] as const) {
+        for (const value of array(body[key]) ?? []) {
+          const row = object(value);
+          hits.push({ type, id: id(row.id), ...(type === 'episode' ? { showId: id(row.show_id), season: number(row.season_number,true,0)!, episode: id(row.episode_number) } : {}) });
+        }
+      }
+      return hits;
+    },
+    async repairSearch(query: string, releaseYear: number | null, type: 'movie'|'tv') {
+      const hits = new Map<number, Candidate>(); let complete = true;
+      for (const language of ['ru-RU','en-US']) {
+        for (let page = 1; page <= 5; page++) {
+          const params: Record<string,string> = { query, page: String(page), include_adult: 'true' };
+          if (releaseYear !== null) params[type === 'movie' ? 'year' : 'first_air_date_year'] = String(releaseYear);
+          const body = object(await request(`/search/${type}`, params, language));
+          const pages = number(body.total_pages, true);
+          if (pages === null || !Array.isArray(body.results)) throw new TmdbError('Invalid repair search.');
+          for (const value of body.results) { const row = object(value); const c = { id: id(row.id), title: title(type === 'movie' ? row.title : row.name), original_title: string(type === 'movie' ? row.original_title : row.original_name), year: year(type === 'movie' ? row.release_date : row.first_air_date) }; hits.set(c.id,c); }
+          if (pages <= page) break;
+          if (page === 5) complete = false;
+        }
+      }
+      return { candidates: [...hits.values()], complete };
+    },
+    async repairSeasons(showId: number): Promise<RepairHit[]> {
+      id(showId); const body=object(await request(`/tv/${showId}`,{}));
+      if(id(body.id)!==showId)throw new TmdbError('Wrong TV identity.');
+      return (array(body.seasons)??[]).map(value=>{const s=object(value);const season=number(s.season_number,true,0);if(season===null)throw new TmdbError('Missing season number.');return {type:'season',id:id(s.id),showId,season};});
+    },
+    async repairWork(hit: RepairHit): Promise<RepairWork> {
+      id(hit.id);
+      const path = hit.type === 'season' ? `/tv/${id(hit.showId)}/season/${number(hit.season,true,0)}` : hit.type === 'episode' ? `/tv/${id(hit.showId)}/season/${number(hit.season,true,0)}/episode/${id(hit.episode)}` : `/${hit.type}/${hit.id}`;
+      const row = object(await request(path, { append_to_response: hit.type === 'movie' ? 'credits,external_ids,alternative_titles,release_dates' : 'credits,external_ids,alternative_titles' }));
+      if (id(row.id) !== hit.id) throw new TmdbError('Wrong repair identity.');
+      const localized = object(await request(path, {}, 'ru-RU'));
+      if (id(localized.id) !== hit.id) throw new TmdbError('Wrong localized repair identity.');
+      const movieLike = hit.type === 'movie' ? row : { ...row, title: row.name, original_title: row.original_name ?? row.name, release_date: row.air_date ?? row.first_air_date, runtime: hit.type === 'episode' ? row.runtime : hit.type === 'season' ? (array(row.episodes)??[]).reduce<number>((sum,value)=>sum+(number(object(value).runtime,true)??0),0) : null, poster_path: hit.type === 'episode' ? row.still_path : row.poster_path, backdrop_path: hit.type === 'episode' ? row.still_path : row.backdrop_path };
+      const details = parseDetails({ ...movieLike, media_type: 'movie' });
+      const localizedTitle = string(hit.type === 'movie' ? localized.title : localized.name);
+      const localizedOverview = string(localized.overview);
+      const external = row.external_ids == null ? {} : object(row.external_ids);
+      const imdb = string(external.imdb_id);
+      if (imdb && !/^tt\d+$/.test(imdb)) throw new TmdbError('Invalid external IMDb ID.');
+      const titles = new Set([details.title, details.original_title, localizedTitle].filter((s): s is string => !!s));
+      if (row.alternative_titles) { const a=object(row.alternative_titles); for (const v of array(a.titles ?? a.results) ?? []) { const t=string(object(v).title); if(t)titles.add(t); } }
+      const years = new Set<number>(details.year === null ? [] : [details.year]);
+      if (row.release_dates) for(const v of array(object(row.release_dates).results) ?? []) for(const d of array(object(v).release_dates) ?? []) {
+        const date=string(object(d).release_date); if(date&&/^\d{4}-\d{2}-\d{2}T/.test(date)) years.add(Number(date.slice(0,4)));
+      }
+      return { ...hit, details, imdb, titles: [...titles], years: [...years], presentation: {
+        title: localizedTitle && /[А-Яа-яЁё]/u.test(localizedTitle) ? localizedTitle : details.original_title ?? details.title,
+        overview: localizedOverview && /[А-Яа-яЁё]/u.test(localizedOverview) ? localizedOverview : null,
+      } };
+    },
     async identitySearch(query: string, releaseYear: number | null, mediaType: 'movie'|'tv', language='ru-RU') {
       const params:Record<string,string>={query,page:'1',include_adult:'true'};
       if(releaseYear!==null)params[mediaType==='tv'?'first_air_date_year':'year']=String(releaseYear);

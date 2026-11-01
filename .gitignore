@@ -25,3 +25,5 @@ npm-debug.log*
 /filmy-otca-final.json
 
 *.russian.lock
+
+*.tmdb-repair.lock

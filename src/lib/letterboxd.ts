@@ -1,3 +1,4 @@
+import {repairedCatalogAlias} from './catalog-alias';
 import { requireProfileSchema } from './profiles';
 import { personalScope, type UserId } from './profiles';
 import type Database from 'better-sqlite3';
@@ -150,6 +151,11 @@ export async function importLetterboxd(database: Database.Database, userId: User
     let addedMovies = 0, addedHistory = 0, preservedHistory = 0, attachedUris = 0, ratingsOutsideWatched = 0;
     for (const group of plan.groups) {
       let movie = group.uri ? movies.find(item => item.letterboxd_uri === group.uri) : undefined;
+      let matchedAlias=false;
+      if(movie&&!database.prepare('SELECT 1 FROM user_movies WHERE user_id=? AND movie_id=?').get(userId,movie.id)){
+        const canonicalId=repairedCatalogAlias(database,movie.id);
+        if(canonicalId!==null){movie=movies.find(row=>row.id===canonicalId);matchedAlias=true;}
+      }
       if (!movie) {
         const identity = key(group.title, group.year);
         const candidates = identity ? movies.filter(item => key(item.title, item.release_year) === identity) : [];
@@ -165,7 +171,7 @@ export async function importLetterboxd(database: Database.Database, userId: User
         const inserted = database.prepare('INSERT INTO movies (title, release_year, letterboxd_uri) VALUES (?, ?, ?)').run(group.title, group.year, group.uri);
         movie = { id: Number(inserted.lastInsertRowid), title: group.title, release_year: group.year, letterboxd_uri: group.uri };
         movies.push(movie); addedMovies++;
-      } else if (group.uri && !movie.letterboxd_uri) {
+      } else if (group.uri && !movie.letterboxd_uri && !matchedAlias) {
         database.prepare('UPDATE movies SET letterboxd_uri = ? WHERE id = ?').run(group.uri, movie.id);
         movie.letterboxd_uri = group.uri; attachedUris++;
       }
