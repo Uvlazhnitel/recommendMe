@@ -1,17 +1,18 @@
 'use client';
 
-import { useId, type CSSProperties } from 'react';
+import { useId, type CSSProperties, type ReactNode } from 'react';
 import { ratingDraft } from '../rating-draft';
 
 const commitKeys = new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown']);
 
-export function RatingControl({ value, onChange, watched }: { value: string; onChange: (value: string) => void; watched: boolean }) {
+export function RatingControl({ value, onChange, watched, summary }: { value: string; onChange: (value: string) => void; watched: boolean; summary?: ReactNode }) {
   const id = useId(), draft = ratingDraft(value);
   const selected = draft.value !== null;
   return <div className={`rating-control ${selected ? 'has-rating' : 'no-rating'}`}>
     <div className="rating-control-heading"><label htmlFor={`${id}-range`}>{watched ? 'Ваша оценка' : 'Оценка просмотра'}<span>{watched ? 'Измените своё впечатление' : 'Можно оставить без оценки'}</span></label>
       <output className="rating-number" htmlFor={`${id}-range ${id}-exact`}>{selected ? <><strong>{draft.value}</strong><span>/100</span></> : <span className="rating-unset">{draft.invalid ? 'Проверьте число' : 'Без оценки'}</span>}</output>
     </div>
+    {summary}
     <input id={`${id}-range`} className="rating-range" type="range" min={0} max={100} step={1} value={draft.value ?? 50}
       aria-valuetext={selected ? `${draft.value} из 100` : 'Без оценки. Измените шкалу или введите число.'} aria-describedby={`${id}-help`}
       style={{ '--rating-fill': `${draft.value ?? 0}%` } as CSSProperties}

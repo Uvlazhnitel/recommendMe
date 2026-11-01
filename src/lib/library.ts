@@ -1,3 +1,4 @@
+import { tmdbImage } from './movie-images';
 import { catalogTitle } from './movie-titles';
 import { hasRussianCache, russianMovie, russianGenres } from './russian-presentation';
 import { legacyMovieInfo } from './legacy-marks';
@@ -42,7 +43,7 @@ type Row = {
   watchlist?:number|null;watched: number | null; rating_100: number | null; review_text?: string | null; rating_source: 'none' | 'manual' | 'letterboxd' | null; not_interested: number | null;
   letterboxd_uri: string | null; original_rating_stars: number | null; letterboxd_date: string | null; letterboxd_rating_date: string | null;
   watched_at: string | null; created_at: string | null; updated_at: string | null; media_type: string; runtime_minutes: number | null;
-  overview: string | null; original_language: string | null; tmdb_vote_average: number | null; tmdb_vote_count: number | null; tmdb_popularity: number | null;
+  backdrop_path?: string | null; overview: string | null; original_language: string | null; tmdb_vote_average: number | null; tmdb_vote_count: number | null; tmdb_popularity: number | null;
   metadata_updated_at: string | null; tmdb_enrichment_status: string; tmdb_attempted_at: string | null;
 };
 const columns = (db: Database.Database) => `${(db.pragma('user_version',{simple:true}) as number)>=9?'coalesce(u.watchlist,0) AS watchlist,':''}${(db.pragma('user_version', { simple: true }) as number) >= 6 ? 'u.review_text' : 'NULL AS review_text'},m.*,u.watched,u.rating_100,u.rating_source,u.not_interested,u.original_rating_stars,
@@ -92,7 +93,7 @@ export function readLibraryMovie(db: Database.Database, userId: UserId, movieId:
   const row = db.prepare(`SELECT ${columns(db)} FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId WHERE m.id=?`).get({userId}, movieId) as Row | undefined;
   if (!row) throw new LibraryError('movie_not_found');
   return { ...summary(row, db, userId), ...legacyMovieInfo(db,userId,movieId), release_year: row.release_year, tmdb_release_year: row.tmdb_release_year, media_type: row.media_type,
-    runtime_minutes: row.runtime_minutes, overview: hasRussianCache(db) ? (row.media_type === 'tv' ? row.overview : russianMovie(db, row.tmdb_id)?.overview) ?? 'Описание на русском пока отсутствует.' : row.overview, original_language: row.original_language, tmdb_vote_average: row.tmdb_vote_average,
+    backdrop_path: tmdbImage(row.backdrop_path) ? row.backdrop_path! : null, runtime_minutes: row.runtime_minutes, overview: hasRussianCache(db) ? (row.media_type === 'tv' ? row.overview : russianMovie(db, row.tmdb_id)?.overview) ?? 'Описание на русском пока отсутствует.' : row.overview, original_language: row.original_language, tmdb_vote_average: row.tmdb_vote_average,
     tmdb_vote_count: row.tmdb_vote_count, tmdb_popularity: row.tmdb_popularity, credits: decode(row.credits_json), metadata_updated_at: row.metadata_updated_at,
     tmdb_enrichment_status: row.tmdb_enrichment_status, tmdb_attempted_at: row.tmdb_attempted_at };
 }

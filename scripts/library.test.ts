@@ -250,3 +250,16 @@ test('HTTP edit/read/clear preserves watched state, returns no-store and sanitiz
     const error = await failed.list(profileRequest('http://localhost/')); assert.equal(error.status, 500); assert.ok(!(await error.text()).includes('/private'));
   } finally { globalThis.fetch = originalFetch; f.close(); }
 });
+
+test('movie details return only a validated saved backdrop without changing data or list summaries', () => {
+  const f = fixture(); try {
+    for (const [path,expected] of [[null,null],['/coast.jpg','/coast.jpg'],['https://example.test/coast.jpg',null],['/../coast.jpg',null]] as const) {
+      f.db.prepare('UPDATE movies SET backdrop_path=? WHERE id=1').run(path);
+      const before=f.db.prepare('SELECT * FROM movies WHERE id=1').get();
+      assert.equal(readLibraryMovie(f.db, 'ilya', 1).backdrop_path,expected);
+      assert.equal(readLibraryMovie(f.db, 'valeriy', 1).backdrop_path,expected);
+      assert.deepEqual(f.db.prepare('SELECT * FROM movies WHERE id=1').get(),before);
+      assert.ok(!Object.hasOwn(readLibrary(f.db, 'ilya').items[0],'backdrop_path'));
+    }
+  } finally { f.close(); }
+});

@@ -132,6 +132,54 @@ try {
   const ratios=pairs.map(pair=>Number(contrast(...pair).toFixed(2)));assert.ok(ratios.every(ratio=>ratio>=4.5));measurements.push({kind:'text_contrast',ratios,threshold:4.5});
   assert.equal(await page.getByRole('link',{name:'Рекомендации',exact:true}).getAttribute('aria-current'),'page');
 
+  // Cinematic details: read-response fixtures, never edit the protected personal database.
+  const filmArt=JSON.parse(readFileSync(join(root,'src/app/preview/recommendations/assets/sources.json'),'utf8'))[0];
+  let filmVariant='ready';
+  await page.route('**/api/library/1',async route=>{
+    if(route.request().method()!=='GET')return route.continue();
+    const response=await route.fetch(),film=await response.json();
+    const owner=route.request().headers()['x-profile-id'];
+    const presented={...film,title:owner==='ilya'?'Blade Runner 2049':'Бегущий по лезвию 2049',...(owner==='ilya'?{subtitle:'Бегущий по лезвию 2049'}:{}),year:2017,runtime_minutes:164,
+      poster_path:filmArt.poster_path,backdrop_path:filmArt.backdrop_path,rating_100:70,
+      overview:'В недалёком будущем офицер полиции обнаруживает тайну, способную изменить хрупкий мир людей и репликантов. Поиски ответов приводят его к исчезнувшему тридцать лет назад Рику Декарду.',
+      genres:[{id:878,name:'Фантастика'},{id:18,name:'Драма'}],directors:[{id:1,name:'Denis Villeneuve'}]};
+    if(filmVariant==='missing'){presented.poster_path=null;presented.backdrop_path=null;presented.directors=[];presented.overview=null;presented.title='Очень длинное название фильма '.repeat(8);}
+    if(filmVariant==='broken')presented.backdrop_path='/missing-frame.jpg';
+    await fulfill(route,{json:presented});
+  });
+  const filmHistory=database(db=>JSON.stringify(db.prepare('SELECT * FROM user_movies ORDER BY user_id,movie_id').all())),filmPaid=openaiCalls();
+  for(const width of [375,430,768,1024,1440]){
+    await page.setViewportSize({width,height:1000});await go('/library?movie_id=1');await rating().waitFor();
+    await page.locator('.film-header.has-backdrop').waitFor();
+    await until(()=>page.locator('.film-backdrop img').evaluate(img=>img.complete&&img.naturalWidth>0),'cinematic backdrop loaded');
+    assert.equal(await page.locator('.film-backdrop img').evaluate(img=>img.naturalWidth>0),true);
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    assert.match(await page.locator('.film-metadata').innerText(),/2 ч 44 мин/);
+    assert.equal(await page.locator('.film-review-panel textarea').count(),1);
+    assert.equal(await page.locator('.film-rating-panel textarea').count(),0);
+    const boxes=await page.locator('.film-overview,.film-rating-column,.film-review-panel').evaluateAll(els=>els.map(el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,bottom:r.bottom,right:r.right};}));
+    if(width<1024){assert.ok(boxes[1].y>=boxes[0].bottom);assert.ok(boxes[2].y>=boxes[1].bottom);}else{assert.ok(boxes[1].x>=boxes[0].right);assert.ok(Math.abs(boxes[2].x-boxes[0].x)<1);}
+    await screenshot(`film-page-${width}`,true);
+    await rating().fill('0');await page.locator('.film-saved-status .current-score').waitFor();assert.match(await page.locator('.film-saved-status').innerText(),/Сохранено: 70/);
+    await page.locator('.rating-range').focus();await page.keyboard.press('End');assert.equal(await rating().inputValue(),'100');
+  }
+  for(const variant of ['missing','broken']){
+    filmVariant=variant;await go('/library?movie_id=1');await rating().waitFor();await page.locator('.film-backdrop').waitFor({state:'detached'});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    const identity=await page.locator('.library-film-identity').boundingBox(),back=await page.locator('.library-back').boundingBox();assert.ok(identity.y>=back.y+back.height);
+    if(variant==='missing'){await page.getByText('Описание пока отсутствует.',{exact:true}).waitFor();assert.equal(await page.locator('.film-directors').count(),0);}
+    await screenshot('film-page-'+variant,true);
+  }
+  filmVariant='ready';await page.getByRole('button',{name:'Сменить профиль: Илья',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Валерий',exact:true}).click();
+  await page.getByRole('button',{name:'Сменить профиль: Валерий',exact:true}).waitFor();await go('/library?movie_id=1');
+  await page.locator('.film-header.has-backdrop').waitFor();assert.equal(await page.locator('.library-film-identity h2').innerText(),'Бегущий по лезвию 2049');assert.equal(await page.locator('.library-film-identity .movie-subtitle').count(),0);
+  await page.getByRole('button',{name:'Сменить профиль: Валерий',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Илья',exact:true}).click();
+  await page.getByRole('button',{name:'Сменить профиль: Илья',exact:true}).waitFor();
+  await page.unroute('**/api/library/1');
+  assert.equal(openaiCalls(),filmPaid);assert.equal(database(db=>JSON.stringify(db.prepare('SELECT * FROM user_movies ORDER BY user_id,movie_id').all())),filmHistory);
+  await page.setViewportSize({width:1440,height:1000});await go('/');
+  check('cinematic library details: 5 widths, independent rating/review, keyboard0/100, saved-vs-draft, real image fixtures, missing/broken backdrop, long title, both profiles and zero personal writes/AI');
+
   await configureOpen();await screenshot('generation-settings');
   assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('dialog'))));
   for(const key of ['Tab','Tab','Shift+Tab']){await page.keyboard.press(key);const focus=await page.evaluate(()=>({inside:Boolean(document.activeElement.closest('dialog')),tag:document.activeElement.tagName,text:document.activeElement.textContent?.slice(0,50)}));assert.ok(focus.inside,JSON.stringify({key,...focus}));}

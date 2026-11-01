@@ -4,6 +4,7 @@ import type { ReactNode, Ref } from 'react';
 import type { MovieEditorModel } from '../use-movie-editor';
 import { ratingDraft } from '../rating-draft';
 import { MoviePoster } from './movie-poster';
+import { LibraryFilmPage } from './library-film-page';
 import { RatingControl } from './rating-control';
 import { Button, LoadingState } from './ui';
 
@@ -11,6 +12,7 @@ export function MovieEditor({ model: m, enhanced = false, collection = false, he
   const film = m.selected;
   if (m.selecting || m.pending === 'select') return <LoadingState>Загрузка фильма…</LoadingState>;
   if (!film) return <section className="selection-hint">{enhanced ? <><h2>Ваше впечатление о фильме</h2><p>Выберите фильм в результатах. Здесь появятся детали и шкала оценки.</p></> : <p>Выберите фильм, чтобы открыть детали и сохранить оценку.</p>}</section>;
+  if (collection) return <LibraryFilmPage model={m} film={film} headingRef={headingRef} feedback={feedback} />;
   const draft = ratingDraft(m.score);
   const posterAndTitle = <div className="editor-film"><MoviePoster path={film.poster_path} title={film.title} fallbackTitle={collection} sizes={collection ? '(max-width: 767px) 100px, 180px' : enhanced ? '(max-width: 767px) 88px, (max-width: 1023px) 120px, 96px' : '(max-width: 600px) 80px, 120px'} />
     <div>{film.subtitle === undefined ? <p className="muted">{[film.year ?? 'Год неизвестен', ...(enhanced ? [film.runtime_minutes ? `${film.runtime_minutes} мин` : null] : [])].filter(Boolean).join(' · ')}</p> : null}

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { ImageConfigContext } from 'next/dist/shared/lib/image-config-context.shared-runtime';
+import { imageConfigDefault } from 'next/dist/shared/lib/image-config';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { libraryFixture } from './fixtures/library';
 import { libraryParams, libraryReadUrl, libraryScore, libraryUrl, parseLibraryState, defaultLibraryState } from '../src/app/library-state';
@@ -85,4 +87,39 @@ test('clearing a nonempty query is a separate button and never changes the searc
   assert.match(html,/<label for="library-query">Название фильма<\/label>/);
   assert.match(html,/id="library-query"/); assert.match(html,/aria-label="Очистить поиск"/);
   assert.doesNotMatch(html,/<label for="library-query">[^<]*<button/);
+});
+
+test('cinematic library layout separates rating and review and keeps the ordinary rate screen unchanged', () => {
+  const model={ selected:{movie_id:1,tmdb_id:201,title:'About Elly',subtitle:'История Элли',year:2009,watched:true,rating_100:70,rating_source:'letterboxd',poster_path:null,backdrop_path:'/coast.jpg',runtime_minutes:119,overview:'Сохранённое описание.',genres:[{id:18,name:'Драма'}],watchlist:false},
+    score:'0',review:'Черновик впечатлений',setScore(){},selecting:false,pending:null,busy:false } as unknown as MovieEditorModel;
+  const html=renderToStaticMarkup(<ImageConfigContext.Provider value={{...imageConfigDefault,unoptimized:true}}><MovieEditor model={model} enhanced collection /></ImageConfigContext.Provider>);
+  assert.match(html,/class="film-backdrop"/);
+  assert.match(html,/2009 · 1 ч 59 мин · Драма/);
+  assert.match(html,/Сохранено: 70 \/ 100/);
+  assert.match(html,/Есть несохранённые изменения/);
+  assert.match(html,/aria-valuetext="0 из 100"/);
+  assert.match(html,/https:\/\/www.themoviedb.org\/movie\/201/);
+  assert.match(html,/Черновик впечатлений/);
+  assert.match(html,/maxlength="2000"/i);
+  assert.equal((html.match(/<form\b/g)??[]).length,1);
+  const form=html.match(/<form\b[\s\S]*?<\/form>/)![0];
+  assert.doesNotMatch(form,/<textarea/);
+  assert.match(html,/film-review-panel/);
+  const ordinary=renderToStaticMarkup(<MovieEditor model={model} enhanced />);
+  assert.doesNotMatch(ordinary,/film-backdrop|library-film-page|film-review-panel/);
+  assert.match(ordinary,/<form\b[\s\S]*?<textarea/);
+});
+
+test('cinematic library fallback is compact and retains null, historical metadata and disabled writes', () => {
+  const model={ selected:{movie_id:1,tmdb_id:null,title:'Без метаданных',year:null,watched:false,rating_100:null,rating_source:'none',poster_path:null,backdrop_path:'https://untrusted.test/image.jpg',legacy_unconfirmed:true,legacy_marks:[{sentiment:'liked',superseded:false}],external_ratings:[{raw:'9.1',source:null}]},
+    score:'',review:'',setScore(){},selecting:false,pending:'watch',busy:true } as unknown as MovieEditorModel;
+  const html=renderToStaticMarkup(<MovieEditor model={model} enhanced collection />);
+  assert.doesNotMatch(html,/film-backdrop|has-backdrop|untrusted\.test/);
+  assert.match(html,/Без оценки/);assert.match(html,/Год неизвестен/);
+  assert.match(html,/Отметка из старого списка: понравилось/);
+  assert.match(html,/Внешний рейтинг: 9.1 · Источник неизвестен/);
+  assert.match(html,/Об источнике/);
+  assert.equal((html.match(/<fieldset[^>]*disabled=""/g)??[]).length,3);
+  assert.doesNotMatch(html,/Сохранить впечатления/);
+  assert.match(html,/Текст сохранится после подтверждения просмотра/);
 });
