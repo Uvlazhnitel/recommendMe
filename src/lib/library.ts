@@ -91,7 +91,7 @@ export function readLibraryMovie(db: Database.Database, userId: UserId, movieId:
   const row = db.prepare(`SELECT ${columns(db)} FROM movies m LEFT JOIN user_movies u ON u.movie_id=m.id AND u.user_id=@userId WHERE m.id=?`).get({userId}, movieId) as Row | undefined;
   if (!row) throw new LibraryError('movie_not_found');
   return { ...summary(row, db), ...legacyMovieInfo(db,userId,movieId), release_year: row.release_year, tmdb_release_year: row.tmdb_release_year, media_type: row.media_type,
-    runtime_minutes: row.runtime_minutes, overview: hasRussianCache(db) ? russianMovie(db, row.tmdb_id)?.overview ?? 'Описание на русском пока отсутствует.' : row.overview, original_language: row.original_language, tmdb_vote_average: row.tmdb_vote_average,
+    runtime_minutes: row.runtime_minutes, overview: hasRussianCache(db) ? (row.media_type === 'tv' ? row.overview : russianMovie(db, row.tmdb_id)?.overview) ?? 'Описание на русском пока отсутствует.' : row.overview, original_language: row.original_language, tmdb_vote_average: row.tmdb_vote_average,
     tmdb_vote_count: row.tmdb_vote_count, tmdb_popularity: row.tmdb_popularity, credits: decode(row.credits_json), metadata_updated_at: row.metadata_updated_at,
     tmdb_enrichment_status: row.tmdb_enrichment_status, tmdb_attempted_at: row.tmdb_attempted_at };
 }
