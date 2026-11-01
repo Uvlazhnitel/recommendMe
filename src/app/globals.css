@@ -545,14 +545,33 @@ html:has(.library-workbench) { scroll-padding-bottom: calc(var(--nav-height) + e
 .text-link:hover { color: var(--color-accent); }
 .home-small-empty { color: var(--color-muted); font-size: 14px; }
 .home-stats { border-top: var(--border); margin-top: 24px; padding-top: 20px; color: var(--color-muted); font-size: 13px; }
-.movie-explanation { background: var(--color-surface); color: var(--color-text); border: var(--border); border-radius: 16px; padding: 32px; width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; }
+.movie-explanation { position: fixed; background: var(--color-surface); color: var(--color-text); border: var(--border); border-radius: 16px; padding: 0; width: min(900px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: hidden; }
+.movie-explanation[open] { display: flex; flex-direction: column; }
 .movie-explanation::backdrop, .new-selection-dialog::backdrop { background: #000b; backdrop-filter: blur(5px); }
-.explanation-heading { display: flex; justify-content: space-between; align-items: start; gap: 20px; }
-.explanation-heading h2 { margin-top: 8px; overflow-wrap: anywhere; }
-.movie-explanation > section { margin-top: 28px; }
-.movie-explanation section h3 { font-size: 17px; margin-bottom: 10px; }
-.movie-explanation section p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.movie-explanation .movie-actions { margin-top: 28px; }
+body:has(.movie-explanation[open]) { overflow: hidden; }
+.explanation-close { position: relative; flex-shrink: 0; align-self: flex-end; margin: 12px 12px 0; width: 44px; height: 44px; padding: 10px; background: var(--color-surface); }
+.explanation-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 36px 32px; scroll-padding: 24px; }
+.explanation-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px 32px; align-items: start; }
+.explanation-poster { grid-column: 1; grid-row: 1 / 3; width: 220px; aspect-ratio: 2 / 3; border-radius: 12px; }
+.explanation-heading { min-width: 0; padding-right: 24px; }
+.explanation-heading h2 { font-size: 30px; line-height: 1.15; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.explanation-meta { margin-top: 16px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.explanation-heading .gallery-genres { margin-top: 6px; }
+.explanation-director { margin-top: 12px; color: var(--color-muted); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.explanation-source { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; min-height: 44px; font-size: 13px; color: var(--color-muted); }
+.explanation-source svg { width: 16px; height: 16px; }
+.explanation-reading { grid-column: 2; min-width: 0; }
+.explanation-reading section + section { margin-top: 28px; }
+.explanation-reading h3 { font-size: 17px; margin-bottom: 10px; font-weight: 750; }
+.explanation-reading p { font-size: 15px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.explanation-fit h3 { padding-left: 12px; border-left: 3px solid var(--color-accent); }
+.explanation-reading .possible-mismatch { margin-top: 28px; }
+.explanation-reading .possible-mismatch p { color: var(--color-muted); }
+.explanation-footer { flex-shrink: 0; border-top: var(--border); padding: 20px 36px; background: var(--color-surface); max-height: 45dvh; overflow-y: auto; }
+.movie-explanation .movie-actions { margin: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.movie-explanation .movie-actions .gallery-watchlist { width: auto; }
+.explanation-footer .explanation-error { margin: 0 0 12px; font-size: 14px; }
+
 .explanation-error { color: var(--color-danger); margin-top: 20px; }
 body:has(.home-v2 dialog[open]) { overflow: hidden; }
 .new-selection-dialog { color: var(--color-text); background: var(--color-surface); border: var(--border); border-radius: 16px; padding: 0; width: min(600px, calc(100vw - 40px)); max-height: calc(100dvh - 48px); overflow: hidden; }
@@ -616,7 +635,19 @@ body:has(.home-v2 dialog[open]) { overflow: hidden; }
   .favorite-meta { font-size: 11px; }
   .favorite-copy > strong { font-size: 12px; margin-top: 4px; }
   .home-stats { padding-top: 16px; font-size: 12px; }
-  .movie-explanation { padding: 24px 20px; width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  .movie-explanation { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .explanation-scroll { padding: 8px 20px 24px; }
+  .explanation-layout { grid-template-columns: 96px minmax(0, 1fr); gap: 24px 16px; }
+  .explanation-poster { grid-row: 1; width: 96px; border-radius: 8px; }
+  .explanation-heading { padding-right: 0; }
+  .explanation-heading h2 { font-size: 23px; }
+  .explanation-meta { font-size: 14px; margin-top: 12px; }
+  .explanation-director { font-size: 13px; }
+  .explanation-reading { grid-column: 1 / -1; }
+  .explanation-footer { padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .movie-explanation .movie-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .movie-explanation .movie-actions > .button:first-child { grid-column: 1 / -1; }
+  .movie-explanation .movie-actions > .button { width: 100%; font-size: 14px; padding: 12px 8px; }
   .new-selection-dialog { width: 100%; max-width: 100%; margin: auto 0 0; border-radius: 20px 20px 0 0; border-bottom: 0; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 16px); }
   .new-selection-dialog::before { content: ''; width: 40px; height: 4px; border-radius: 4px; background: var(--color-border); flex-shrink: 0; margin: 12px auto 0; }
   .selection-dialog-heading { padding: 20px 64px 0 20px; }

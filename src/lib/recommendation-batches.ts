@@ -1,5 +1,5 @@
 import { catalogTitle } from './movie-titles';
-import { russianGenres, russianExplanation, hasRussianCache } from './russian-presentation';
+import { russianGenres, russianExplanation, russianMovie, russianText, hasRussianCache } from './russian-presentation';
 import { requireProfileSchema } from './profiles';
 import { personalScope, type UserId } from './profiles';
 import { parsePreferences, type RecommendationPreferences } from './recommendation-preferences';
@@ -10,6 +10,7 @@ import { tmdbImage } from './movie-images';
 
 export type RecommendationMovie = {
   movie_id: number; tmdb_id: number; title: string; subtitle?: string | null; year: number; genres: string[]; runtime: number;
+  overview?: string | null; directors?: { id: number; name: string }[] | null;
   poster_path: string | null; backdrop_path: string | null; why_fit: string; possible_mismatch: string;
 };
 export type RecommendationBatch = {
@@ -21,6 +22,7 @@ type Row = {
   movie_id: number; tmdb_id: number | null; title: string; tmdb_title: string | null; original_title: string | null;
   release_year: number | null; tmdb_release_year: number | null; media_type: string; runtime_minutes: number | null;
   poster_path: string | null; backdrop_path?: string | null; genres_json: string | null;
+  overview: string | null; directors_json: string | null;
 };
 const meaningful = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim());
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -64,8 +66,18 @@ export function readRecommendationBatch(db: Database.Database, userId: UserId, r
         try { genres = JSON.parse(row.genres_json ?? '[]'); } catch { batch.unavailable_count++; continue; }
         if (!Array.isArray(genres) || !genres.every(genre => genre && typeof genre === 'object' && meaningful(genre.name))) { batch.unavailable_count++; continue; }
         const explanations = russianExplanation(db, userId, { ...row, why_fit: row.why_fit!, possible_mismatch: row.possible_mismatch! });
+        const localizedOverview = russianMovie(db, row.tmdb_id)?.overview;
+        const overview = meaningful(localizedOverview) ? localizedOverview :
+          meaningful(row.overview) && russianText(row.overview) ? row.overview : null;
+        let directors: RecommendationMovie['directors'] = [];
+        try {
+          const parsed: unknown = JSON.parse(row.directors_json ?? '[]');
+          if (Array.isArray(parsed)) directors = parsed.filter((person): person is { id: number; name: string } =>
+            person && typeof person === 'object' && Number.isSafeInteger(person.id) && person.id > 0 && meaningful(person.name))
+            .map(({ id, name }) => ({ id, name }));
+        } catch { /* Missing or malformed optional credits must not hide a recommendation. */ }
         batch.movies.push({ movie_id: row.movie_id, tmdb_id: row.tmdb_id, ...catalogTitle(db, userId, row, row.tmdb_title ?? row.title), year, genres: (hasRussianCache(db) ? russianGenres(genres) : genres).map(genre => genre.name),
-          runtime: row.runtime_minutes, poster_path: tmdbImage(row.poster_path) ? row.poster_path : null,
+          overview, directors, runtime: row.runtime_minutes, poster_path: tmdbImage(row.poster_path) ? row.poster_path : null,
           backdrop_path: tmdbImage(row.backdrop_path) ? row.backdrop_path! : null,
           ...explanations });
       }

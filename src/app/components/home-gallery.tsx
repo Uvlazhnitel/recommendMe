@@ -11,7 +11,7 @@ import { Button, EmptyState } from './ui';
 
 export function trapDialogFocus(event: KeyboardEvent<HTMLDialogElement>) {
   if (event.key !== 'Tab') return;
-  const buttons = event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled)');
+  const buttons = event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]');
   const first = buttons[0], last = buttons[buttons.length - 1], active = document.activeElement;
   if (event.shiftKey && (active === first || !Array.from(buttons).includes(active as HTMLElement))) { event.preventDefault(); last?.focus(); }
   else if (!event.shiftKey && active === last) { event.preventDefault(); first?.focus(); }
@@ -24,12 +24,13 @@ export function HomeGallery({ batch, busy, onWatch, onReject, error = '' }: {
   const [selected, setSelected] = useState<RecommendationMovie | null>(null);
   const movies = batch?.movies ?? [];
   const watchlist = useWatchlist();
-  function saveButton(movie: RecommendationMovie) {
+  function saveButton(movie: RecommendationMovie, primary = false) {
     const saved = watchlist.items.some(item => item.movie_id === movie.movie_id);
-    return <Button className="gallery-watchlist" tone="quiet" disabled={watchlist.loading || watchlist.pending || saved} onClick={event => { event.stopPropagation(); void watchlist.save(movie.movie_id, true); }}><Icon name={saved ? 'check' : 'bookmark'} />{saved ? '✓ В списке' : 'Посмотреть позже'}</Button>;
+    return <Button className="gallery-watchlist" tone={primary ? 'primary' : 'quiet'} disabled={watchlist.loading || watchlist.pending || saved} onClick={event => { event.stopPropagation(); void watchlist.save(movie.movie_id, true); }}><Icon name={saved ? 'check' : 'bookmark'} />{saved ? (primary ? 'В списке' : '✓ В списке') : 'Посмотреть позже'}</Button>;
   }
   function open(movie: RecommendationMovie, button: HTMLButtonElement) {
     trigger.current = button; setSelected(movie); dialog.current?.showModal();
+    dialog.current?.querySelector('.explanation-scroll')?.scrollTo({ top: 0 });
   }
   function close() { dialog.current?.close(); }
   return <section className="home-results" aria-label="Фильмы подборки" aria-busy={busy}>
@@ -52,13 +53,32 @@ export function HomeGallery({ batch, busy, onWatch, onReject, error = '' }: {
       if (trigger.current?.isConnected) trigger.current.focus();
       else document.getElementById('home-results-title')?.focus();
     }}>
-      {selected ? <><div className="explanation-heading"><div><>{selected.subtitle === undefined ? <p className="gallery-meta">{selected.year} · {selected.runtime} мин</p> : null}<h2 id="explanation-title">{selected.title}</h2>{selected.subtitle ? <p className="movie-subtitle">{selected.subtitle}</p> : null}{selected.subtitle !== undefined ? <p className="gallery-meta">{selected.year} · {selected.runtime} мин</p> : null}</></div><Button tone="quiet" aria-label="Закрыть объяснение" onClick={close}><Icon name="close" /></Button></div>
-        <p className="gallery-genres">{selected.genres.join(' · ')}</p>
-        <section><h3>Почему мне понравится</h3><p>{selected.why_fit}</p></section>
-        <section className="possible-mismatch"><h3>Что может не подойти</h3><p>{selected.possible_mismatch}</p></section>
-        {error || watchlist.error ? <p className="explanation-error" role="alert">{error || watchlist.error}</p> : null}
-        <div className="movie-actions">{saveButton(selected)}<Button tone="light" disabled={busy} onClick={() => { close(); onWatch(selected); }}>Посмотрел</Button>
-          <Button tone="quiet" disabled={busy} onClick={async () => { if (await onReject(selected)) close(); }}>Неинтересно</Button></div></> : null}
+      {selected ? <>
+        <Button tone="quiet" className="explanation-close" aria-label="Закрыть объяснение" onClick={close}><Icon name="close" /></Button>
+        <div className="explanation-scroll">
+          <div className="explanation-layout">
+            <MoviePoster path={selected.poster_path} title={selected.title} className="explanation-poster" sizes="(max-width: 767px) 96px, 220px" />
+            <div className="explanation-heading">
+              <h2 id="explanation-title">{selected.title}</h2>
+              {selected.subtitle ? <p className="movie-subtitle">{selected.subtitle}</p> : null}
+              <p className="explanation-meta">{selected.year} · {Math.floor(selected.runtime / 60)} ч{selected.runtime % 60 ? ` ${selected.runtime % 60} мин` : ''}</p>
+              {selected.genres.length ? <p className="gallery-genres">{selected.genres.join(' · ')}</p> : null}
+              {selected.directors?.length ? <p className="explanation-director">Режиссёр: {selected.directors.map(person => person.name).join(', ')}</p> : null}
+              <a className="explanation-source text-link" href={`https://www.themoviedb.org/movie/${selected.tmdb_id}`} target="_blank" rel="noopener noreferrer">Открыть в TMDB <Icon name="arrow-up-right" /></a>
+            </div>
+            <div className="explanation-reading">
+              <section className="explanation-overview"><h3>О фильме</h3><p>{selected.overview || 'Описание на русском пока недоступно'}</p></section>
+              <section className="explanation-fit"><h3>Почему мне понравится</h3><p>{selected.why_fit}</p></section>
+              <section className="possible-mismatch"><h3>Что может не подойти</h3><p>{selected.possible_mismatch}</p></section>
+            </div>
+          </div>
+        </div>
+        <div className="explanation-footer">
+          {error || watchlist.error ? <p className="explanation-error" role="alert">{error || watchlist.error}</p> : null}
+          <div className="movie-actions">{saveButton(selected, true)}<Button tone="light" disabled={busy} onClick={() => { close(); onWatch(selected); }}>Посмотрел</Button>
+            <Button tone="quiet" disabled={busy} onClick={async () => { if (await onReject(selected)) close(); }}>Неинтересно</Button></div>
+        </div>
+      </> : null}
     </dialog>
   </section>;
 }

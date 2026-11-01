@@ -166,7 +166,7 @@ try {
     assert.equal(await page.locator('.gallery-card .gallery-open').count(),5);assert.equal(await page.locator('.gallery-excerpt').count(),0);assert.equal(await page.locator('.favorite-card').count(),4);await screenshot(`home-5-${width}`,true);}
   for(const [width,columns] of [[320,1],[1280,5]]){await page.setViewportSize({width,height:900});assert.equal(await page.locator('.recommendation-grid').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),columns);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
   await page.setViewportSize({width:1440,height:1000});
-  await openMovie(first.batch.movies[0].title);const originalText=first.batch.movies[0].why_fit;assert.equal(await page.locator('.movie-explanation section').first().locator('p').innerText(),originalText);
+  await openMovie(first.batch.movies[0].title);const originalText=first.batch.movies[0].why_fit;assert.equal(await page.locator('.movie-explanation .explanation-fit p').innerText(),originalText);
   for(const key of ['Tab','Tab','Tab','Tab','Shift+Tab']) {await page.keyboard.press(key);assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('.movie-explanation'))));}
   await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);
   for (const movie of first.batch.movies) {
@@ -177,7 +177,40 @@ try {
     await page.keyboard.press('Escape');
   }
   check('all five cards render English TMDB titles with Russian subtitles, full explanations and risks from persistent cache');
-  for(const width of [375,430]) {await page.setViewportSize({width,height:1000});await openMovie(first.batch.movies[0].title);assert.ok(await page.locator('.movie-explanation').evaluate(el=>el.scrollWidth<=el.clientWidth));await screenshot(`home-details-${width}`);await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);}
+  for(const width of [375,430,768,1440]) {await page.setViewportSize({width,height:812});await openMovie(first.batch.movies[0].title);assert.ok(await page.locator('.movie-explanation').evaluate(el=>el.scrollWidth<=el.clientWidth));await screenshot(`home-details-${width}`);await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);}
+  // Optional metadata and long text stay readable; opening/closing has no provider calls or writes.
+  const detailMovie=first.batch.movies[0];
+  const detailBefore=database(db=>JSON.stringify(db.prepare('SELECT * FROM user_movies ORDER BY user_id,movie_id').all()));
+  await page.route('**/api/recommendations',async route=>{
+    const response=await route.fetch(), body=await response.json();
+    body.batch.movies[0]={...body.batch.movies[0],title:'A Long English Movie Title '.repeat(5),subtitle:'Длинное русское название '.repeat(5),
+      overview:'Полное описание фильма без сокращения. '.repeat(80),why_fit:'Подробное объяснение соответствия вкусу. '.repeat(40),
+      directors:[{id:10,name:'Режиссёр с длинным именем'}],poster_path:null};
+    await fulfill(route,{json:body});
+  });
+  await go('/');
+  const detailCalls=openaiCalls(), detailTmdb=calls('api.themoviedb.org');
+  for(const width of [375,430,768,1440]) {
+    await page.setViewportSize({width,height:812});await page.locator('.gallery-open').first().click();
+    const modal=page.locator('.movie-explanation');
+    assert.equal(await modal.locator('.explanation-reading section').count(),3);
+    assert.match(await modal.locator('.explanation-overview p').innerText(),/Полное описание/);
+    assert.match(await modal.locator('.explanation-director').innerText(),/Режиссёр с длинным именем/);
+    assert.equal(await modal.getByRole('link',{name:/Открыть в TMDB/}).getAttribute('href'),`https://www.themoviedb.org/movie/${detailMovie.tmdb_id}`);
+    assert.equal(await modal.getByRole('img',{name:/Постер отсутствует/}).count(),1);
+    assert.ok(await modal.evaluate(el=>el.scrollWidth<=el.clientWidth));
+    const footer=await modal.locator('.explanation-footer').boundingBox(),close=await modal.locator('.explanation-close').boundingBox();
+    assert.ok(footer.y+footer.height<=812&&close.y>=0);
+    await modal.locator('.explanation-scroll').evaluate(el=>{el.scrollTop=el.scrollHeight;});
+    assert.deepEqual(await modal.locator('.explanation-footer').boundingBox(),footer);
+    assert.deepEqual(await modal.locator('.explanation-close').boundingBox(),close);
+    await screenshot(`movie-details-long-${width}`);
+    await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);
+  }
+  assert.equal(openaiCalls(),detailCalls);assert.equal(calls('api.themoviedb.org'),detailTmdb);
+  await page.unroute('**/api/recommendations');await go('/');
+  assert.equal(database(db=>JSON.stringify(db.prepare('SELECT * FROM user_movies ORDER BY user_id,movie_id').all())),detailBefore);
+  check('movie details: long bilingual text, missing poster, saved synopsis/director, TMDB link, scroll and fixed controls at 375/430/768/1440, zero provider calls or personal writes');
   await page.setViewportSize({width:1440,height:1000});
   check('gallery5 all widths, saved wishes distinct from draft, full explanations, modal Escape/focus');
   await screenshot('recommendations-desktop');

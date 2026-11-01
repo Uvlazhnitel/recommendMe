@@ -250,3 +250,28 @@ test('search merges local English titles without new provider requests; unknown 
     assert.equal(calls,3);assert.equal(snapshot(f.db),before);
   }finally{f.cleanup();}
 });
+
+
+test('recommendation details use saved Russian synopsis and validated directors without writing data', () => {
+  const f = setup(); try {
+    const read = (user: 'ilya' | 'valeriy' = 'ilya') => readRecommendationBatch(f.db, user)!.movies[0];
+    assert.equal(read().overview, null); // English source is not a Russian synopsis.
+    saveRussianMovie(f.db, 201, { title: 'Фильм', overview: 'Полное русское описание.\nВторой абзац.' });
+    const before = snapshot(f.db), ranking = buildRankingContext(f.db, 'ilya', report([201]).candidates).input;
+    for (const user of ['ilya', 'valeriy'] as const) {
+      assert.equal(read(user).overview, 'Полное русское описание.\nВторой абзац.');
+      assert.deepEqual(read(user).directors, [{ id: 10, name: 'Director' }]);
+    }
+    assert.equal(snapshot(f.db), before);
+    assert.deepEqual(buildRankingContext(f.db, 'ilya', report([201]).candidates).input, ranking);
+    f.db.prepare('UPDATE ru_movie_metadata SET overview=NULL WHERE tmdb_id=201').run();
+    f.db.prepare('UPDATE movies SET overview=? WHERE tmdb_id=201').run('Сохранённое русское описание.');
+    assert.equal(read().overview, 'Сохранённое русское описание.');
+    for (const raw of [null, '[]', '[null,{"id":-1,"name":"Invalid"},{"id":1,"name":""}]']) {
+      f.db.prepare('UPDATE movies SET directors_json=? WHERE tmdb_id=201').run(raw);
+      assert.deepEqual(read().directors, []);
+    }
+    f.db.prepare('UPDATE movies SET directors_json=? WHERE tmdb_id=201').run('[{"id":10,"name":"Director","private":"ignored"},null]');
+    assert.deepEqual(read().directors, [{ id: 10, name: 'Director' }]);
+  } finally { f.cleanup(); }
+});
