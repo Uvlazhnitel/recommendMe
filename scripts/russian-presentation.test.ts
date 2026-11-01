@@ -1,3 +1,6 @@
+import { movieTitle, catalogTitle, titleForMatch } from '../src/lib/movie-titles';
+import { movieHandlers } from '../src/lib/movie-http';
+import { profileRequest } from './fixtures/profile-request';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
@@ -42,7 +45,8 @@ test('Russian display overlays preserve canonical data, ranking inputs, IDs and 
     await translateExplanation(f.db, 'ilya', f.rows[0].id, api);
     saveRussianMovie(f.db, 201, { title: 'Русское название', overview: 'Русское описание.' });
     const batch = readRecommendationBatch(f.db, 'ilya')!;
-    assert.equal(batch.movies[0].title, 'Русское название');
+    assert.equal(batch.movies[0].title, 'Film 201');
+    assert.equal(batch.movies[0].subtitle, 'Русское название');
     assert.equal(batch.movies[0].why_fit, ru.why_fit);
     assert.deepEqual(batch.movies.map(row => row.tmdb_id), [201]);
     assert.match(readRecommendationBatch(f.db, 'valeriy')!.movies[0].why_fit, /ещё не подготовлено/);
@@ -115,10 +119,11 @@ test('TMDB presentation is ru-RU, validates identity, handles missing descriptio
   assert.deepEqual(russianGenres([{ id: 18, name: 'Drama' }, { id: 878, name: 'Science Fiction' }]).map(row => row.name), ['Драма','Фантастика']);
 });
 
-test('favorites use Russian title without changing selection; missing Russian overview has a Russian placeholder', () => {
+test('favorites use profile-specific title without changing selection; missing Russian overview has a Russian placeholder', () => {
   const f = fixture(); try {
     saveRussianMovie(f.db, 101, { title: 'Любимый фильм', overview: null });
-    assert.equal(readHomeSummary(f.db, 'ilya').favorites[0].title, 'Любимый фильм');
+    assert.equal(readHomeSummary(f.db, 'ilya').favorites[0].title, 'Favourite');
+    assert.equal(readHomeSummary(f.db, 'ilya').favorites[0].subtitle, 'Любимый фильм');
     assert.match(readLibraryMovie(f.db, 'ilya', 1).overview!, /Описание на русском/);
   } finally { f.cleanup(); }
 });
@@ -181,4 +186,67 @@ test('concurrent default translation uses one API call and source edits during t
     assert.equal((f.db.prepare('SELECT status FROM ru_recommendation_text WHERE recommendation_id=?').get(row.id) as {status:string}).status,'failed');
     assert.equal(readRecommendationBatch(f.db,'ilya')!.movies[0].why_fit,'Русское объяснение ещё не подготовлено.');
   } finally { f.cleanup(); }
+});
+
+
+for (const [label, input, expected] of [
+  ['English over original', {title:'Русское',english:'English',original:'한국어',russian:'Русское'}, {title:'English',subtitle:'Русское'}],
+  ['original fallback', {title:'Русское',english:null,original:'한국어',russian:'Русское'}, {title:'한국어',subtitle:'Русское'}],
+  ['source fallback', {title:'Исходное',russian:'Исходное'}, {title:'Исходное',subtitle:null}],
+  ['no Russian', {title:'Source',english:'English',russian:null}, {title:'English',subtitle:null}],
+  ['non-Russian cache fallback', {title:'Source',english:'English',russian:'English'}, {title:'English',subtitle:null}],
+  ['equivalent titles', {title:'МЫ  ДВОЕ',original:'мы двое',russian:'  МЫ  ДВОЕ  '}, {title:'мы двое',subtitle:null}],
+  ['empty English', {title:'Source',english:'  ',original:'Original',russian:'Перевод'}, {title:'Original',subtitle:'Перевод'}],
+  ['long titles', {title:'Source',english:'Long '.repeat(100).trim(),russian:'Длинное '.repeat(100).trim()}, {title:'Long '.repeat(100).trim(),subtitle:'Длинное '.repeat(100).trim()}],
+] as const) test(`Ilya bilingual title: ${label}; Valeriy unchanged`, () => {
+  assert.deepEqual(movieTitle('ilya', input), expected);
+  assert.deepEqual(movieTitle('valeriy', input), {title:input.title});
+});
+
+test('bilingual library, details, watchlist, favorites and recommendations are readonly and keep ranking inputs', () => {
+  const f=setup();try{
+    const movie=f.rows[0].movie_id;
+    f.db.prepare("UPDATE movies SET tmdb_title='English Movie',original_title='한국어' WHERE id=?").run(movie);
+    saveRussianMovie(f.db,201,{title:'Русское кино',overview:'Русское описание.'});
+    f.db.prepare("INSERT INTO user_movies(user_id,movie_id,watched,rating_100,watchlist) VALUES('ilya',?,1,90,1)").run(movie);
+    f.db.prepare("INSERT INTO user_movies(user_id,movie_id,watched,rating_100,watchlist) VALUES('valeriy',?,1,90,1)").run(movie);
+    const before=snapshot(f.db),ranking=buildRankingContext(f.db,'ilya',report([202]).candidates).input;
+    for(const owner of ['ilya','valeriy'] as const){
+      const detail=readLibraryMovie(f.db,owner,movie);
+      const rows=[detail,...readLibrary(f.db,owner,new URLSearchParams('q=Русское')).items,...readLibrary(f.db,owner,new URLSearchParams('watchlist=true')).items];
+      assert.ok(rows.length>=3);
+      for(const row of rows){assert.equal(row.title,owner==='ilya'?'English Movie':'Русское кино');assert.equal(row.subtitle,owner==='ilya'?'Русское кино':undefined);assert.equal(row.rating_100,90);}
+      assert.equal(readLibrary(f.db,owner,new URLSearchParams('q=English')).items[0].movie_id,movie);
+      assert.equal(detail.overview,'Русское описание.');
+      const favorite=readHomeSummary(f.db,owner).favorites.find(row=>row.movie_id===movie)!;
+      assert.equal(favorite.title,owner==='ilya'?'English Movie':'Русское кино');assert.equal(favorite.subtitle,owner==='ilya'?'Русское кино':undefined);
+      assert.equal(titleForMatch(f.db,owner,{movie_id:movie,title:'Legacy'}).title,owner==='ilya'?'English Movie':'Legacy');
+    }
+    assert.deepEqual(buildRankingContext(f.db,'ilya',report([202]).candidates).input,ranking);assert.equal(snapshot(f.db),before);
+    f.db.prepare('UPDATE user_movies SET watched=0,rating_100=NULL WHERE movie_id=?').run(movie);
+    assert.equal(readRecommendationBatch(f.db,'ilya')!.movies[0].title,'English Movie');
+    assert.equal(readRecommendationBatch(f.db,'ilya')!.movies[0].subtitle,'Русское кино');
+    assert.equal(readRecommendationBatch(f.db,'valeriy')!.movies[0].title,'Русское кино');
+    assert.equal(readRecommendationBatch(f.db,'valeriy')!.movies[0].subtitle,undefined);
+    const tv={title:'Русский эпизод',tmdb_id:null,tmdb_title:'English Episode',original_title:'Original Episode'};
+    assert.deepEqual(catalogTitle(f.db,'ilya',tv),{title:'English Episode',subtitle:'Русский эпизод'});
+  }finally{f.cleanup();}
+});
+
+test('search merges local English titles without new provider requests; unknown titles use original; profiles never leak', async()=>{
+  const f=setup();let calls=0;
+  try{
+    f.db.prepare("UPDATE movies SET tmdb_title='English Movie',original_title='한국어' WHERE tmdb_id=201").run();
+    saveRussianMovie(f.db,201,{title:'Русское кино',overview:null});
+    const results=[{id:201,title:'Русское кино',original_title:'한국어',year:2000,poster_path:null},{id:99999,title:'Другой фильм',original_title:'日本語',year:2001,poster_path:null}];
+    const handlers=movieHandlers({open:f.open,api:()=>({searchInteractive:async()=>{calls++;return {results,has_more:false};},details:async()=>{throw Error('No details or LLM requests allowed');}})});
+    const before=snapshot(f.db);
+    for(const owner of ['ilya','valeriy','ilya'] as const){
+      const response=await handlers.search(profileRequest('http://localhost/api/movies/search?q=кино',{},owner));assert.equal(response.status,200);
+      const body=await response.json();
+      if(owner==='valeriy')assert.deepEqual(body.results,results);
+      else {assert.equal(body.results[0].title,'English Movie');assert.equal(body.results[0].subtitle,'Русское кино');assert.equal(body.results[1].title,'日本語');assert.equal(body.results[1].subtitle,'Другой фильм');}
+    }
+    assert.equal(calls,3);assert.equal(snapshot(f.db),before);
+  }finally{f.cleanup();}
 });

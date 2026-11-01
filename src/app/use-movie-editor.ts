@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, json, message, scoreValue, type Match } from './workbench-api';
 
-export type Film = { movie_id: number; tmdb_id: number | null; title: string; year: number | null; watched: boolean;
+export type Film = { movie_id: number; tmdb_id: number | null; title: string; subtitle?: string | null; year: number | null; watched: boolean;
   legacy_unconfirmed?:boolean;watchlist?:boolean;external_ratings?:{raw:string;source:string|null}[];legacy_marks?: {sentiment:'liked'|'disliked'|'mixed'|null;superseded:boolean}[]; rating_100: number | null; review_text?: string | null; rating_source: string; not_interested: boolean; original_rating_stars: number | null; poster_path: string | null;
   original_title?: string | null; tmdb_title?: string | null; directors?: { id: number; name: string }[] | null; overview?: string | null; runtime_minutes?: number | null; genres?: { id: number; name: string }[] | null };
 type Operation = 'select' | 'watch' | 'rating' | 'clear' | 'reject' | 'review' | 'watchlist';

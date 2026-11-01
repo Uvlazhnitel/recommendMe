@@ -13,9 +13,11 @@ export function MovieEditor({ model: m, enhanced = false, collection = false, he
   if (!film) return <section className="selection-hint">{enhanced ? <><h2>Ваше впечатление о фильме</h2><p>Выберите фильм в результатах. Здесь появятся детали и шкала оценки.</p></> : <p>Выберите фильм, чтобы открыть детали и сохранить оценку.</p>}</section>;
   const draft = ratingDraft(m.score);
   const posterAndTitle = <div className="editor-film"><MoviePoster path={film.poster_path} title={film.title} fallbackTitle={collection} sizes={collection ? '(max-width: 767px) 100px, 180px' : enhanced ? '(max-width: 767px) 88px, (max-width: 1023px) 120px, 96px' : '(max-width: 600px) 80px, 120px'} />
-    <div><p className="muted">{[film.year ?? 'Год неизвестен', ...(enhanced ? [film.runtime_minutes ? `${film.runtime_minutes} мин` : null] : [])].filter(Boolean).join(' · ')}</p>
+    <div>{film.subtitle === undefined ? <p className="muted">{[film.year ?? 'Год неизвестен', ...(enhanced ? [film.runtime_minutes ? `${film.runtime_minutes} мин` : null] : [])].filter(Boolean).join(' · ')}</p> : null}
       <h2 ref={headingRef} tabIndex={enhanced ? -1 : undefined}>{film.title}</h2>
-      {collection && film.original_title && film.original_title !== film.title ? <p className="editor-original-title">{film.original_title}</p> : null}
+      {film.subtitle ? <p className="movie-subtitle">{film.subtitle}</p> : null}
+      {film.subtitle !== undefined ? <p className="muted">{[film.year ?? 'Год неизвестен', ...(enhanced ? [film.runtime_minutes ? `${film.runtime_minutes} мин` : null] : [])].filter(Boolean).join(' · ')}</p> : null}
+      {film.subtitle === undefined && collection && film.original_title && film.original_title !== film.title ? <p className="editor-original-title">{film.original_title}</p> : null}
       {enhanced && film.genres?.length ? <p className="editor-genres">{film.genres.map(genre => genre.name).join(' · ')}</p> : null}
       {collection && film.directors?.length ? <p className="muted">{film.directors.map(person => person.name).join(', ')}</p> : null}
       <p className="watch-status">{film.watched ? 'Уже просмотрен' : enhanced ? 'Не просмотрен' : 'Просмотр не отмечен'}</p>

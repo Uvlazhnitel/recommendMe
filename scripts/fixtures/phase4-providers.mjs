@@ -53,6 +53,7 @@ globalThis.fetch = async (input, init) => {
   if (url.pathname.endsWith('/recommendations')) return Response.json({ results: [] });
   if (url.pathname.endsWith('/search/movie')) {
     const q = (url.searchParams.get('query') ?? '').toLowerCase();
+    if(q==='bilingual')return Response.json({total_pages:1,results:[{id:8888800,title:'Длинное русское название для проверки подзаголовка',original_title:'한국어',release_date:'2023-01-01',poster_path:null}]});
     if (q === 'error') return Response.json({}, { status: 503 });
     let results = q === 'empty' ? [] : q === 'variants' ? extras.slice(0, 2) : q === 'extra' ? [extras[2]] : q === 'duplicate' ? [extras[3]] :
       [...available(control), ...sources, ...extras].filter(movie => movie.title.toLowerCase() === q);

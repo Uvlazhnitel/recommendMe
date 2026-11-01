@@ -55,8 +55,8 @@ export function RateWorkbench({ model: m, initialMovieId, initialMovieError }: {
           return <li key={film.id}><button id={`rate-result-${film.id}`} className={`rate-result ${selected ? 'selected' : ''}`} type="button" aria-pressed={selected} disabled={m.busy || m.selecting}
             onClick={async () => { if (await m.add(film)) setEditing(true); }} aria-label={`Выбрать ${film.title} (${film.year ?? 'год неизвестен'})`}>
             <MoviePoster path={film.poster_path} title={film.title} sizes="(max-width: 767px) 64px, 80px" />
-            <span className="rate-result-copy"><span className="rate-result-title">{film.title}</span><span className="rate-result-year">{film.year ?? 'Год неизвестен'}</span>
-              {film.original_title && film.original_title !== film.title ? <span className="rate-original-title">{film.original_title}</span> : null}</span>
+            <span className="rate-result-copy"><span className="rate-result-title">{film.title}</span>{film.subtitle ? <span className="movie-subtitle">{film.subtitle}</span> : null}<span className="rate-result-year">{film.year ?? 'Год неизвестен'}</span>
+              {film.subtitle === undefined && film.original_title && film.original_title !== film.title ? <span className="rate-original-title">{film.original_title}</span> : null}</span>
             <span className="rate-select-label">{m.addingId === film.id ? 'Загрузка…' : selected ? 'Выбран' : 'Выбрать'}</span>
           </button></li>;
         })}</ul>
@@ -74,7 +74,7 @@ export function RateWorkbench({ model: m, initialMovieId, initialMovieError }: {
 function OperationNotice({ model: m, onReload }: { model: Model; onReload: () => void }) {
   return <>
     {m.notice ? m.notice.error ? <ErrorState>{m.notice.text}</ErrorState> : <p className="success-state" role="status">{m.notice.text}</p> : null}
-    {m.matches.length ? <section className="rate-duplicates" aria-label="Возможные совпадения"><h3>Похожие записи в вашей истории</h3><p>Новая запись не добавлена. Эти фильмы не связаны автоматически.</p><ul>{m.matches.map(film => <li key={film.movie_id}><strong>{film.title}</strong><span>{film.year ?? 'Год неизвестен'} · Локальный номер {film.movie_id}</span></li>)}</ul></section> : null}
+    {m.matches.length ? <section className="rate-duplicates" aria-label="Возможные совпадения"><h3>Похожие записи в вашей истории</h3><p>Новая запись не добавлена. Эти фильмы не связаны автоматически.</p><ul>{m.matches.map(film => <li key={film.movie_id}><strong>{film.title}</strong>{film.subtitle ? <span className="movie-subtitle">{film.subtitle}</span> : null}<span>{film.year ?? 'Год неизвестен'} · Локальный номер {film.movie_id}</span></li>)}</ul></section> : null}
     {m.recoveryMovieId !== null ? <Button tone="quiet" type="button" disabled={m.busy || m.selecting} onClick={onReload}>Перечитать фильм</Button> : null}
   </>;
 }

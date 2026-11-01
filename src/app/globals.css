@@ -663,3 +663,9 @@ body:has(.profile-dialog[open]) { overflow:hidden; }
   .watchlist-results li { grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
   .watchlist-results li > button { grid-column: 2; justify-self: start; }
 }
+
+/* Ilya's bilingual headings; Valeriy retains existing title presentation. */
+.movie-subtitle { display: block; color: var(--color-muted); font-size: .85em; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+.bilingual-title { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.explanation-heading .movie-subtitle, .editor-film .movie-subtitle { margin-top: 6px; }
+.favorite-copy .movie-subtitle { font-size: 11px; }

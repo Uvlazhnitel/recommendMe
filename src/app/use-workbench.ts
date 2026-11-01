@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, json, message } from './workbench-api';
 import { useMovieEditor } from './use-movie-editor';
 export type { Film } from './use-movie-editor';
-export type SearchFilm = { id: number; title: string; original_title: string | null; year: number | null; poster_path: string | null };
+export type SearchFilm = { id: number; title: string; subtitle?: string | null; original_title: string | null; year: number | null; poster_path: string | null };
 
 export function useWorkbench(_mode: 'rate', initialMovieId?: number) {
   const editor = useMovieEditor(initialMovieId);

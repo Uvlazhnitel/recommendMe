@@ -20,17 +20,17 @@ export function WatchlistWorkbench() {
       {search.results?.length === 0 ? <p role="status">Фильмы не найдены. Попробуйте другое название.</p> : null}
       <ul className="watchlist-results">{search.results?.map(film => {
         const saved = list.items.some(item => item.tmdb_id === film.id);
-        return <li key={film.id}><MoviePoster path={film.poster_path} title={film.title} sizes="64px" /><div><strong>{film.title}</strong>{film.original_title && film.original_title !== film.title ? <p>{film.original_title}</p> : null}<p>{film.year ?? 'Год неизвестен'}</p></div>
+        return <li key={film.id}><MoviePoster path={film.poster_path} title={film.title} sizes="64px" /><div><strong>{film.title}</strong>{film.subtitle ? <span className="movie-subtitle">{film.subtitle}</span> : null}{film.subtitle === undefined && film.original_title && film.original_title !== film.title ? <p>{film.original_title}</p> : null}<p>{film.year ?? 'Год неизвестен'}</p></div>
           <Button tone="quiet" disabled={list.loading || list.pending || saved} onClick={() => void list.save(null, true, film.id)}>{saved ? '✓ В списке' : '+ В список'}</Button></li>;
       })}</ul>
       {search.more && search.results?.length ? <p className="field-help">Показана первая страница TMDB. Уточните название, если нужного фильма нет.</p> : null}
     </section> : null}
     {list.error ? <ErrorState>{list.error}<Button tone="quiet" disabled={list.pending} onClick={() => void list.refresh()}>Обновить список</Button></ErrorState> : null}
-    {list.matches.length ? <section aria-label="Возможные совпадения"><h2>Похожие записи в каталоге</h2><p>Новый фильм не добавлен. Записи не объединены. Проверьте существующий вариант:</p><ul>{list.matches.map(film => <li key={film.movie_id}><Link className="text-link" href={`/library?movie_id=${film.movie_id}`}>{film.title} · {film.year ?? 'Год неизвестен'}</Link><Button tone="quiet" disabled={list.pending} onClick={() => void list.save(film.movie_id, true)}>+ В список</Button></li>)}</ul></section> : null}
+    {list.matches.length ? <section aria-label="Возможные совпадения"><h2>Похожие записи в каталоге</h2><p>Новый фильм не добавлен. Записи не объединены. Проверьте существующий вариант:</p><ul>{list.matches.map(film => <li key={film.movie_id}><Link className="text-link" href={`/library?movie_id=${film.movie_id}`}>{film.title}{film.subtitle ? <span className="movie-subtitle">{film.subtitle}</span> : null} · {film.year ?? 'Год неизвестен'}</Link><Button tone="quiet" disabled={list.pending} onClick={() => void list.save(film.movie_id, true)}>+ В список</Button></li>)}</ul></section> : null}
     {list.loading ? <LoadingState>Загрузка списка…</LoadingState> : !list.items.length && !list.error ? <EmptyState title="Пока ничего не отложено"><p>Добавьте фильм из рекомендаций или найдите его по названию.</p></EmptyState> : null}
     <ul className="watchlist-grid">{list.items.map(film => <li key={film.movie_id}><article className="watchlist-card" aria-label={film.title}>
-      <Link href={`/library?movie_id=${film.movie_id}`}><MoviePoster path={film.poster_path} title={film.title} sizes="(max-width: 767px) 44vw, 200px" /><h2>{film.title}</h2></Link>
-      {film.original_title && film.original_title !== film.title ? <p className="muted">{film.original_title}</p> : null}<p>{film.year ?? 'Год неизвестен'}</p>
+      <Link href={`/library?movie_id=${film.movie_id}`}><MoviePoster path={film.poster_path} title={film.title} sizes="(max-width: 767px) 44vw, 200px" /><h2>{film.title}</h2>{film.subtitle ? <span className="movie-subtitle">{film.subtitle}</span> : null}</Link>
+      {film.subtitle === undefined && film.original_title && film.original_title !== film.title ? <p className="muted">{film.original_title}</p> : null}<p>{film.year ?? 'Год неизвестен'}</p>
       <p>{film.watched ? 'Уже просмотрен' : 'Не просмотрен'}{film.rating_100 !== null ? ` · ${film.rating_100}/100` : ''}</p>
       <Button tone="quiet" disabled={list.pending} onClick={() => void list.save(film.movie_id, false)}>Убрать из списка</Button>
     </article></li>)}</ul>

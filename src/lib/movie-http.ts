@@ -1,3 +1,4 @@
+import { catalogTitle, movieTitle, titleForMatch, type TitleRow } from './movie-titles';
 import { warmRussianMovies } from './russian-metadata';
 import { profileRoute } from './profile-http';
 import { ProfileError, requireProfileSchema, type UserId } from './profiles';
@@ -43,7 +44,20 @@ export function movieHandlers(dependencies: { api?: () => CatalogApi; open?: typ
       if (!query || [...query].length > 200 || (yearValue !== null && (!/^\d{1,4}$/.test(yearValue) || Number(yearValue) < 1))) {
         return reply({ error: 'invalid_search', message: 'Введите название от 1 до 200 символов и год целым числом от 1 до 9999.' }, 400);
       }
-      try { const db=(dependencies.open??openDatabase)({readonly:true});try{requireProfileSchema(db);}finally{db.close();} return reply(await (dependencies.api ?? manualApi)().searchInteractive(query, yearValue === null ? undefined : Number(yearValue))); }
+      try {
+        const db = (dependencies.open ?? openDatabase)({ readonly: true });
+        try {
+          requireProfileSchema(db);
+          const result = await (dependencies.api ?? manualApi)().searchInteractive(query, yearValue === null ? undefined : Number(yearValue));
+          if (userId !== 'ilya') return reply(result);
+          return reply({ ...result, results: result.results.map(film => {
+            const row = db.prepare('SELECT title,tmdb_id,tmdb_title,original_title FROM movies WHERE tmdb_id=?').get(film.id) as TitleRow | undefined;
+            const titles = row ? catalogTitle(db, userId, row) : movieTitle(userId, { title: film.title, original: film.original_title, russian: film.title });
+            if (!titles.subtitle) titles.subtitle = movieTitle(userId, { title: titles.title, russian: film.title }).subtitle;
+            return { ...film, ...titles };
+          }) });
+        } finally { db.close(); }
+      }
       catch (error) { if (error instanceof ProfileError) throw error; return failure(error); }
     },
     async add(request: Request, userId: UserId) {
@@ -59,7 +73,8 @@ export function movieHandlers(dependencies: { api?: () => CatalogApi; open?: typ
         // Delay API construction until details are needed: existing IDs work without a configured key.
         const result = await addCatalogMovie(db, { details: id => (dependencies.api ?? manualApi)().details(id) }, body.tmdb_id, dependencies.backup);
         if (!dependencies.open && result.status !== 'possible_duplicate') await warmRussianMovies([result.movie_id]);
-        return reply(result, result.status === 'created' ? 201 : result.status === 'possible_duplicate' ? 409 : 200);
+        const presented = result.status === 'possible_duplicate' ? { ...result, matches: result.matches.map(match => titleForMatch(db!, userId, match)) } : result;
+        return reply(presented, result.status === 'created' ? 201 : result.status === 'possible_duplicate' ? 409 : 200);
       } catch (error) { if (error instanceof ProfileError) throw error; return failure(error); }
       finally { db?.close(); }
     },

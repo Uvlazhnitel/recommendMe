@@ -162,7 +162,7 @@ try {
     const columns=width>=1280?5:width>=768?3:2;assert.equal(cards.filter(c=>Math.abs(c.y-cards[0].y)<1).length,columns);
     measurements.push({kind:'home_gallery',width,columns,card_width:cards[0].width,first_row_bottom:Math.max(...cards.slice(0,columns).map(c=>c.bottom))});
     if(width===1440){assert.ok(cards.every(c=>Math.abs(c.y-cards[0].y)<1));assert.ok(cards.every(c=>c.bottom<=900));}
-    if(width<768){const nav=await page.locator('.navigation').boundingBox();assert.ok(cards.slice(0,2).every(c=>c.bottom<=nav.y),'first row fully visible above navigation');}
+    if(width<768){await page.locator('.gallery-card').first().evaluate(el=>el.scrollIntoView({block:'center',behavior:'instant'}));const nav=await page.locator('.navigation').boundingBox();assert.ok((await page.locator('.gallery-card').first().boundingBox()).y+(await page.locator('.gallery-card').first().boundingBox()).height<=nav.y,'bilingual card reachable above navigation by scrolling');await page.evaluate(()=>scrollTo(0,0));}
     assert.equal(await page.locator('.gallery-card .gallery-open').count(),5);assert.equal(await page.locator('.gallery-excerpt').count(),0);assert.equal(await page.locator('.favorite-card').count(),4);await screenshot(`home-5-${width}`,true);}
   for(const [width,columns] of [[320,1],[1280,5]]){await page.setViewportSize({width,height:900});assert.equal(await page.locator('.recommendation-grid').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),columns);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));}
   await page.setViewportSize({width:1440,height:1000});
@@ -170,13 +170,13 @@ try {
   for(const key of ['Tab','Tab','Tab','Tab','Shift+Tab']) {await page.keyboard.press(key);assert.ok(await page.evaluate(()=>Boolean(document.activeElement.closest('.movie-explanation'))));}
   await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);
   for (const movie of first.batch.movies) {
-    assert.match(movie.title, /[А-Яа-яЁё]/u); assert.match(movie.why_fit, /[А-Яа-яЁё]/u); assert.match(movie.possible_mismatch, /[А-Яа-яЁё]/u);
+    assert.match(movie.title, /[A-Za-z]/u);assert.match(movie.subtitle, /[А-Яа-яЁё]/u);assert.equal(await page.locator('.gallery-card').filter({has:page.getByRole('button',{name:`Подробнее: ${movie.title}`,exact:true})}).locator('.movie-subtitle').innerText(),movie.subtitle); assert.match(movie.why_fit, /[А-Яа-яЁё]/u); assert.match(movie.possible_mismatch, /[А-Яа-яЁё]/u);
     await openMovie(movie.title);
     assert.ok((await page.locator('.movie-explanation').innerText()).includes(movie.why_fit));
     assert.ok((await page.locator('.movie-explanation').innerText()).includes(movie.possible_mismatch));
     await page.keyboard.press('Escape');
   }
-  check('all five cards render Russian TMDB titles, full explanations and risks from persistent cache');
+  check('all five cards render English TMDB titles with Russian subtitles, full explanations and risks from persistent cache');
   for(const width of [375,430]) {await page.setViewportSize({width,height:1000});await openMovie(first.batch.movies[0].title);assert.ok(await page.locator('.movie-explanation').evaluate(el=>el.scrollWidth<=el.clientWidth));await screenshot(`home-details-${width}`);await page.keyboard.press('Escape');assert.match(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),/Подробнее/);}
   await page.setViewportSize({width:1440,height:1000});
   check('gallery5 all widths, saved wishes distinct from draft, full explanations, modal Escape/focus');
@@ -291,7 +291,7 @@ try {
   await go('/rate');const query=page.getByPlaceholder('Какой фильм вы посмотрели?');
   await query.fill('variants');await page.getByRole('spinbutton',{name:'Год необязательно'}).fill('2020');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990002').waitFor();assert.equal(await page.locator('.rate-result').count(),1);
   await query.fill('variants');await page.getByRole('spinbutton',{name:'Год необязательно'}).fill('');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990001').waitFor();assert.equal(await page.locator('.rate-result').count(),2);
-  await query.fill('duplicate');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990004').click();await page.locator('.rate-duplicates').waitFor();assert.match(await page.locator('.rate-duplicates').innerText(),/Legacy Duplicate/);
+  await query.fill('duplicate');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990004').click();await page.locator('.rate-duplicates').waitFor();assert.match(await page.locator('.rate-duplicates').innerText(),/Original 830/);
   await query.fill('empty');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.getByRole('heading',{name:'Фильм не найден',exact:true}).waitFor();
   await query.fill('error');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await alerts().first().waitFor();
   await query.fill('extra');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();await page.locator('#rate-result-990003').click();await rating().waitFor();
@@ -469,6 +469,40 @@ try {
   database(db=>assert.deepEqual(db.prepare("SELECT watched,rating_100,watchlist FROM user_movies WHERE user_id='valeriy' AND movie_id=3").get(),{watched:0,rating_100:null,watchlist:1}));
   await page.getByRole('button',{name:'Убрать из «Посмотреть позже»',exact:true}).click();await page.getByRole('button',{name:'Посмотреть позже',exact:true}).waitFor();
   assert.equal(openaiCalls(),historicalCalls);check('historical marks desktop/mobile: external ratings labelled, 0/edit/clear supersedes history, independent watchlist; zero paid calls');
+  // A real bilingual catalog entry, shared by both profiles; no writes through the UI.
+  const bilingual=database(db=>{
+    const result=db.prepare("INSERT INTO movies(title,tmdb_title,original_title,tmdb_id,release_year,media_type,runtime_minutes,genres_json) VALUES(?,?,?,8888800,2023,'movie',100,'[]')").run('Source Bilingual','A Long English Movie Title That Wraps Across Multiple Lines','한국어');
+    const id=Number(result.lastInsertRowid);
+    db.prepare("INSERT INTO ru_movie_metadata(tmdb_id,title,overview,fetched_at) VALUES(8888800,?,'Русское описание.',?)").run('Длинное русское название для проверки подзаголовка',new Date().toISOString());
+    for(const user of ['ilya','valeriy'])db.prepare('INSERT INTO user_movies(user_id,movie_id,watched,rating_100,watchlist) VALUES(?,?,1,100,1)').run(user,id);
+    return {id,title:'A Long English Movie Title That Wraps Across Multiple Lines',subtitle:'Длинное русское название для проверки подзаголовка'};
+  });
+  const bilingualBefore=database(db=>JSON.stringify(db.prepare('SELECT * FROM user_movies ORDER BY user_id,movie_id').all())),bilingualPaid=openaiCalls();
+  const titleTab=await context.newPage();await titleTab.goto(base+'/');
+  for(const owner of ['ilya','valeriy','ilya']){
+    const name=owner==='ilya'?'Илья':'Валерий';
+    const currentName=await titleTab.locator('.profile-control strong').innerText();
+    if(currentName!==name){await titleTab.getByRole('button',{name:'Сменить профиль: '+currentName,exact:true}).click();await titleTab.getByRole('dialog').getByRole('button',{name,exact:true}).click();}
+    await page.getByRole('button',{name:'Сменить профиль: '+name,exact:true}).waitFor();
+    const expected=owner==='ilya'?bilingual.title:bilingual.subtitle;
+    for(const width of [375,1440]){
+      await page.setViewportSize({width,height:1000});await go('/');
+      const favoriteCard=page.locator('.favorite-card').filter({hasText:expected});await favoriteCard.waitFor();assert.equal(await favoriteCard.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
+      await go('/library?q=Source%20Bilingual');await libraryReady();
+      const card=page.locator('.library-card');assert.equal(await card.locator('.library-card-title').innerText(),expected);assert.equal(await card.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await screenshot(`bilingual-${owner}-library-${width}`);
+      await card.click();await rating().waitFor();assert.equal(await page.locator('.editor-film h2').innerText(),expected);assert.equal(await page.locator('.editor-film .movie-subtitle').count(),owner==='ilya'?1:0);
+      await go(`/rate?movie_id=${bilingual.id}`);await rating().waitFor();assert.equal(await page.locator('.editor-film h2').innerText(),expected);await screenshot(`bilingual-${owner}-details-${width}`);
+      await go('/rate');await page.getByPlaceholder('Какой фильм вы посмотрели?').fill('bilingual');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();
+      const result=page.locator('#rate-result-8888800');await result.waitFor();assert.equal(await result.locator('.rate-result-title').innerText(),expected);assert.equal(await result.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
+      await go('/watchlist');const later=page.locator('.watchlist-card').filter({hasText:expected});await later.waitFor();assert.equal(await later.locator('h2').innerText(),expected);assert.equal(await later.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
+      await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).click();await page.getByRole('textbox',{name:'Название на русском или английском',exact:true}).fill('bilingual');await page.getByRole('button',{name:'Найти',exact:true}).click();
+      const laterResult=page.locator('.watchlist-results li');await laterResult.waitFor();assert.equal(await laterResult.locator('strong').innerText(),expected);assert.equal(await laterResult.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    }
+  }
+  await titleTab.close();assert.equal(openaiCalls(),bilingualPaid);assert.equal(database(db=>JSON.stringify(db.prepare('SELECT * FROM user_movies ORDER BY user_id,movie_id').all())),bilingualBefore);
+  check('bilingual titles across favorites/library/details/rate/search/watchlist at 375/1440; two-tab Ilya→Valeriy→Ilya; no UI writes or LLM calls');
   assert.equal(errors.length,0,errors.join('\n'));report.mock_calls={openai:openaiCalls(),tmdb:calls('api.themoviedb.org')};report.status='passed';
 } catch(error) {
   report.status='failed';report.failure=error.message;

@@ -1,5 +1,5 @@
 import { profileFetch } from './profile-requests';
-export type Match = { movie_id: number; title: string; year: number | null };
+export type Match = { movie_id: number; title: string; subtitle?: string | null; year: number | null };
 const errors: Record<string, string> = {
   invalid_watchlist: 'Не удалось изменить список: некорректные данные.', watchlist_unavailable: 'Список не изменён. Проверьте связь и повторите попытку.',
   invalid_search: 'Введите название (до 200 символов) и корректный год.', tmdb_unavailable: 'TMDB недоступен. Повторите поиск позже.',
