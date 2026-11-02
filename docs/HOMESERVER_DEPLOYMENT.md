@@ -1,5 +1,15 @@
 # recommendMe: изолированное развёртывание на homeserver
 
+## Навигация и состояние табов — DEPLOYED, 2026-11-02
+
+Release `03b30ffe8221ed267d25492c63e8dd66ded8943b`, image `recommendme:navigation-03b30ff` (`sha256:0a13319ccc05a9166ef7d3a36a2ea3990cbb054afc45ffd126b46bd30624083d`), healthy. Полная Linux/amd64 сборка выполнена на Mac из чистого Git-архива; сервер использует прежние зависимости film-3d67b93 и новые .next/package manifests. Только image и APP_GIT_SHA изменены в конфигурации. SQLite11, mounts, ключи/модель и Serve/Funnel прежние. Исправлены source-aware watchlist/details, память состояния табов и предупреждения о несохранённых полях.
+
+Перед переключением: остановка writers, отсутствие locks, свежий snapshot `snapshot-2026-11-02T12-32-23.926Z-0cb0e486-6d3f-4921-b4d3-d296f9d90b2c`; verify/restore на сервере и независимо на Mac PASS. Все13 таблиц/21файл journal точны до/после/после браузера. Сохранены1416 фильмов/1360 персональных строк/69 рекомендаций/15Evaluation batches/2профиля; миграций и импорта нет. Public health200/anonymous401; Chrome375/1440 обоим профилям подтвердил возврат в watchlist, активный таб, scroll/Back/Forward, отмену сброса черновика, фильтры и возврат к главной; JSошибок/личных writes/API-подборов0. Полная локальная приёмка436DB/50UX/typecheck/lint/build PASS. Физический Safari/iPhone не проверялся.
+
+На сервере было12МБ; временные build/transfer-копии прошлых релизов (1272файла/58252724байта) архивированы на Mac, сверены по SHA256 и только затем удалены с сервера. Также освобождены ровно два unshared BuildKit cache-records текущей сборки (точные ID в PROGRESS/RUNBOOK); общего prune нет. Данные, backups/restore-check, rollback-исходники, images и чужие проекты сохранены. Осталось≈34МБ; дальнейшее управление диском требует отдельной задачи.
+
+Rollback кода: сохранить свежее состояние, остановить app, вернуть `source-before-navigation-03b30ff` и env/config из `deploy-navigation-03b30ff/compose.before.env`/`runtime.before.env`, запустить прежний film-3d67b93 с ТОЙ ЖЕ актуальной SQLite11. Старый backup поверх новых действий не восстанавливать. Приватные RUNBOOK/логи/архив/доказательства: server `deploy-navigation-03b30ff/`, Mac `/Users/uvlazhnitel/.codex/recommendme-navigation-deploy-20261102/`.
+
 ## Текущий runtime — английские названия Ильи, 2026-11-01
 
 Код fb35726915b3347787a13c6db3da00e76aef78ad (origin/codex/family-link-access), образ recommendme:bilingual-fb35726, ID sha256:0e1f7475b611329924815fc67c8a79239f66d6f512c722a122a4a0ccc1ac5930, healthy. APP_GIT_SHA и source/.release-commit совпадают. У Ильи на всех экранах английское основное название и отдельный русский подзаголовок; у Валерия прежнее представление. Исходные данные и контекст рекомендателя не заменены. Прямой запуск «Новая подборка» из dfba87b сохранён.
