@@ -13,6 +13,7 @@ export function useWatchlist() {
   const lock = useRef(false), alive = useRef(false), sequence = useRef(0);
   const readAbort = useRef<AbortController | null>(null);
   const refresh = useCallback(async () => {
+    setLoading(true);
     const run = ++sequence.current, controller = new AbortController();
     readAbort.current?.abort(); readAbort.current = controller;
     try {

@@ -10,7 +10,7 @@ function state(): BrowserState {
 export function applyBrowserProfile(active: ProfileSelection | null) {
   const current=state();if(current.active?.selection_id===active?.selection_id && current.active?.user_id===active?.user_id)return;
   current.epoch++;current.active=active;for(const controller of current.reads)controller.abort();current.reads.clear();
-  try {for(let i=sessionStorage.length-1;i>=0;i--){const key=sessionStorage.key(i);if(key?.startsWith('recommendme-library:'))sessionStorage.removeItem(key);}}catch{}
+  try {for(let i=sessionStorage.length-1;i>=0;i--){const key=sessionStorage.key(i);if(key?.startsWith('recommendme-library:')&&(!active||!key.startsWith(`recommendme-library:${active.selection_id}:`)))sessionStorage.removeItem(key);}}catch{}
 }
 export function profilePositionKey(url:string) {return `recommendme-library:${state().active?.selection_id ?? 'none'}:${url}`;}
 export async function profileFetch(url:string,init:RequestInit={}) {

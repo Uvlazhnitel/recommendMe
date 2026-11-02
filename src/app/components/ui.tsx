@@ -5,8 +5,8 @@ export function Button({ tone = 'primary', className = '', ...props }: ButtonHTM
   return <button className={`button button-${tone} ${className}`} {...props} />;
 }
 
-export function PageHeader({ title, description }: { title: string; description?: string }) {
-  return <div className="page-heading"><h1>{title}</h1>{description ? <p>{description}</p> : null}</div>;
+export function PageHeader({ title, description, headingId }: { title: string; description?: string; headingId?: string }) {
+  return <div className="page-heading"><h1 id={headingId} tabIndex={headingId ? -1 : undefined}>{title}</h1>{description ? <p>{description}</p> : null}</div>;
 }
 
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {

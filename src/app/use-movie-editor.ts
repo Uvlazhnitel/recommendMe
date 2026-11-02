@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ratingDraft } from './rating-draft';
+import { useNavigationGuard } from './components/navigation-provider';
 import { api, ApiError, json, message, scoreValue, type Match } from './workbench-api';
 
 export type Film = { movie_id: number; tmdb_id: number | null; title: string; subtitle?: string | null; year: number | null; watched: boolean;
@@ -20,10 +22,18 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
   // Closing and reopening the same ID is a new read, not a completed old selection.
   if (initialSelection !== initialMovieId) {
     setInitialSelection(initialMovieId); setLoadedInitialId(undefined);
+    if (initialMovieId === undefined) { setSelected(null); setScore(''); setReview(''); setNotice(null); }
   }
   const detailRun = useRef(0), actionLock = useRef(false), alive = useRef(false);
   const detailAbort = useRef<AbortController | null>(null), saved = useRef(onSaved);
   const busy = pending !== null;
+  const draft = ratingDraft(score);
+  const dirty = selected !== null && (draft.invalid || draft.value !== selected.rating_100 || review !== (selected.review_text ?? ''));
+  useNavigationGuard(dirty, () => actionLock.current, () => {
+    if (!selected) return;
+    setScore(selected.rating_100 === null ? '' : String(selected.rating_100));
+    setReview(selected.review_text ?? '');
+  });
   useEffect(() => { saved.current = onSaved; }, [onSaved]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; detailAbort.current?.abort(); }; }, []);
   useEffect(() => {
@@ -61,7 +71,8 @@ export function useMovieEditor(initialMovieId?: number, onSaved?: () => void) {
       const controller = new AbortController(); detailAbort.current = controller;
       const film = await api<Film>(`/api/library/${result.movieId}`, { signal: controller.signal });
       if (!alive.current) return false;
-      setSelected(film); setScore(film.rating_100 === null ? '' : String(film.rating_100));
+      setSelected(film);
+      if (kind === 'select' || kind === 'watch' || kind === 'rating' || kind === 'clear') setScore(film.rating_100 === null ? '' : String(film.rating_100));
       if (kind === 'select' || kind === 'watch' || kind === 'review') setReview(film.review_text ?? '');
       if (alive.current) setNotice({ error: false, text: result.text });
       return true;

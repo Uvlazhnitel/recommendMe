@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { navigationAcceptance } from './navigation-acceptance.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -11,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..'), require = createRequire(import.meta.url);
 const Database = require('better-sqlite3'), args = process.argv.slice(2);
 function option(name, fallback) { const i = args.indexOf(name); if (i < 0) return fallback; if (!args[i+1] || args[i+1].startsWith('--')) throw Error(`Missing ${name} value`); return args[i+1]; }
-if (args.some((arg,i) => i%2 === 0 && !['--port','--output','--playwright-path'].includes(arg))) throw Error('Options: --port, --output, --playwright-path.');
+if (args.some((arg,i) => i%2 === 0 && !['--port','--output','--playwright-path','--suite'].includes(arg))) throw Error('Options: --port, --output, --playwright-path, --suite all|navigation.');
+const suite = option('--suite', 'all');
+assert.ok(['all','navigation'].includes(suite), 'Suite must be all or navigation.');
 const port = Number(option('--port', '45152'));
 assert.ok(Number.isInteger(port) && port > 1024 && port <= 65535, 'Use a test port from 1025 to 65535.');
 const output = resolve(option('--output') ?? mkdtempSync(join(tmpdir(), 'recommendme-phase4-evidence-')));
@@ -123,6 +126,8 @@ try {
   fixture=JSON.parse(readFileSync(metadata,'utf8'));control({});writeFileSync(callsPath,'',{mode:0o600});await start();console.log(`QA production: ${base}; evidence: ${output}`);
   browser=await playwright.chromium.launch({channel:'chrome',headless:true});
   const context=await browser.newContext({viewport:{width:1440,height:1000}});page=await context.newPage();
+  context.on('page', p => p.on('dialog', dialog => void dialog.accept()));
+  page.on('dialog', dialog => void dialog.accept());
   page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error'){if(/Failed to load resource|net::ERR_/.test(message.text()))expectedNetworkErrors.push(message.text());else errors.push(message.text());}});
   const reads=[];page.on('request',request=>{if(request.method()==='GET'&&request.url().startsWith(base+'/api/'))reads.push(request.url());});
   const posts=[];page.on('request',request=>{if(request.method()==='POST'&&request.url().includes('/api/recommendations/generate'))posts.push(JSON.parse(request.postData()));});
@@ -132,6 +137,7 @@ try {
   const ratios=pairs.map(pair=>Number(contrast(...pair).toFixed(2)));assert.ok(ratios.every(ratio=>ratio>=4.5));measurements.push({kind:'text_contrast',ratios,threshold:4.5});
   assert.equal(await page.getByRole('link',{name:'Рекомендации',exact:true}).getAttribute('aria-current'),'page');
 
+  if (suite === 'all') {
   // Cinematic details: read-response fixtures, never edit the protected personal database.
   const filmArt=JSON.parse(readFileSync(join(root,'src/app/preview/recommendations/assets/sources.json'),'utf8'))[0];
   let filmVariant='ready';
@@ -203,7 +209,7 @@ try {
   await page.reload();await until(async()=> (await state()).generation.state==='saved','generation survives reload');await page.locator('.gallery-card').first().waitFor();
   assert.equal(openaiCalls(),2);let first=await state();assert.equal(first.batch.movies.length,5);const firstId=first.batch.result_id;
   assert.equal(first.batch.preferences.mood,'funny');assert.equal(first.batch.preferences.max_runtime,null);
-  await configureOpen();assert.ok(await page.getByRole('radio',{name:/Удиви меня/}).isChecked());await page.getByRole('radio',{name:/Лёгкое и душевное/}).check();await page.keyboard.press('Escape');assert.match(await page.locator('.home-batch-label').innerText(),/Хочу посмеяться/);assert.equal(openaiCalls(),2);
+  await configureOpen();assert.ok(await page.getByRole('radio',{name:/Хочу посмеяться/}).isChecked());await page.getByRole('radio',{name:/Лёгкое и душевное/}).check();await page.keyboard.press('Escape');assert.match(await page.locator('.home-batch-label').innerText(),/Хочу посмеяться/);assert.equal(openaiCalls(),2);
   for(const width of [375,430,768,1024,1440]) {await page.setViewportSize({width,height:width>=768?900:812});await page.evaluate(()=>document.fonts.ready);await page.evaluate(()=>scrollTo(0,0));assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.equal(await page.locator('.gallery-card').count(),5);
     const actions=await page.locator('.home-selection-buttons .button').evaluateAll(els=>els.map(el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width};}));if(width<768){assert.ok(actions[1].y>=actions[0].bottom);assert.ok(Math.abs(actions[0].width-actions[1].width)<1);}else{assert.ok(Math.abs(actions[0].y-actions[1].y)<1);assert.ok(actions[1].x>=actions[0].right);}assert.ok(actions.every(a=>a.x>=0&&a.right<=width));
     const cards=await page.locator('.gallery-card').evaluateAll(els=>els.map(el=>({x:el.getBoundingClientRect().x,y:el.getBoundingClientRect().y,bottom:el.getBoundingClientRect().bottom,width:el.getBoundingClientRect().width})));
@@ -237,6 +243,7 @@ try {
     await fulfill(route,{json:body});
   });
   await go('/');
+  await until(async()=>await page.locator('.gallery-watchlist').first().isEnabled(),'initial watchlist read settles before measuring modal calls');
   const detailCalls=openaiCalls(), detailTmdb=calls('api.themoviedb.org');
   for(const width of [375,430,768,1440]) {
     await page.setViewportSize({width,height:812});await page.locator('.gallery-open').first().click();
@@ -290,7 +297,7 @@ try {
   const watched=[];
   for(const [index,value] of [[0,90],[1,null],[2,0]]) {
     const movie=first.batch.movies[index];await go('/');await openMovie(movie.title);await page.getByRole('button',{name:'Посмотрел',exact:true}).click();
-    await page.waitForURL(base+`/rate?movie_id=${movie.movie_id}`);await rating().waitFor();
+    await page.waitForURL(base+`/rate?movie_id=${movie.movie_id}&from=home`);await rating().waitFor();
     database(db=>assert.equal(db.prepare("SELECT watched FROM user_movies WHERE user_id='ilya' AND movie_id=?").get(movie.movie_id)?.watched??0,0));
     if(value!==null)await rating().fill(String(value));else assert.equal(await rating().inputValue(),'');
     if(index>0)await page.getByRole('textbox',{name:'Впечатления о фильме',exact:false}).fill(`Review with ${value===null?'NULL':'zero'} rating`);
@@ -381,7 +388,7 @@ try {
   await saveRating(100);database(db=>assert.equal(db.prepare("SELECT updated_at FROM user_movies WHERE user_id='ilya' AND movie_id=?").get(savedExtra.id).updated_at,savedExtra.updated_at));
   await screenshot('rate-desktop');check('title/year/versions, empty/error TMDB, possible_duplicate, watch 100 and unchanged timestamps');
   const watchlistPaidBefore = openaiCalls();
-  await go('/watchlist');await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).click();
+  await go('/watchlist');await page.locator('.watchlist-page').waitFor();if(await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).count())await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).click();
   const laterQuery = page.getByRole('textbox',{name:'Название на русском или английском',exact:true});
   const beforeSearchCount=database(db=>db.prepare('SELECT count(*) n FROM movies').get().n);
   for(const title of ['Новый русский фильм','New English Film']) {
@@ -475,7 +482,7 @@ try {
   assert.equal((await http.get(base+'/api/library?year=bad')).status(),400);check('production restart, saved batch, no payment, Origin/no-store/invalid parameters/preview 404');
   await page.setViewportSize({width:1440,height:1000});await go('/');
   const homeState=await state(), freeBefore=openaiCalls();
-  assert.ok(homeState.home.favorites.length>0);const favorite=homeState.home.favorites[0];await page.locator('.favorite-card').first().click();await page.waitForURL(base+`/library?movie_id=${favorite.movie_id}`);await rating().waitFor();await go('/');
+  assert.ok(homeState.home.favorites.length>0);const favorite=homeState.home.favorites[0];await page.locator('.favorite-card').first().click();await page.waitForURL(base+`/library?movie_id=${favorite.movie_id}&from=home`);await rating().waitFor();await go('/');
   await openMovie(homeState.batch.movies[0].title);await page.route('**/api/recommendations/reject',route=>fulfill(route,{status:500,json:{error:'synthetic_failure'}}));await page.getByRole('button',{name:'Неинтересно',exact:true}).click();await page.locator('.movie-explanation [role="alert"]').waitFor();assert.equal(await page.locator('.gallery-card').count(),5);await page.unrouteAll({behavior:'wait'});await page.keyboard.press('Escape');
   check('favorites deep link; failed rejection retains modal/card and shows error');
   const galleryWidths=new Map();for(const width of [375,430,1440]){await page.setViewportSize({width,height:1000});galleryWidths.set(width,(await page.locator('.gallery-card').first().boundingBox()).width);}
@@ -577,13 +584,15 @@ try {
       await go('/rate');await page.getByPlaceholder('Какой фильм вы посмотрели?').fill('bilingual');await page.getByRole('button',{name:'Найти фильм',exact:true}).click();
       const result=page.locator('#rate-result-8888800');await result.waitFor();assert.equal(await result.locator('.rate-result-title').innerText(),expected);assert.equal(await result.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
       await go('/watchlist');const later=page.locator('.watchlist-card').filter({hasText:expected});await later.waitFor();assert.equal(await later.locator('h2').innerText(),expected);assert.equal(await later.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
-      await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).click();await page.getByRole('textbox',{name:'Название на русском или английском',exact:true}).fill('bilingual');await page.getByRole('button',{name:'Найти',exact:true}).click();
+      await page.locator('.watchlist-page').waitFor();if(await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).count())await page.getByRole('button',{name:'+ Добавить фильм',exact:true}).click();await page.getByRole('textbox',{name:'Название на русском или английском',exact:true}).fill('bilingual');await page.getByRole('button',{name:'Найти',exact:true}).click();
       const laterResult=page.locator('.watchlist-results li');await laterResult.waitFor();assert.equal(await laterResult.locator('strong').innerText(),expected);assert.equal(await laterResult.locator('.movie-subtitle').count(),owner==='ilya'?1:0);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     }
   }
   await titleTab.close();assert.equal(openaiCalls(),bilingualPaid);assert.equal(database(db=>JSON.stringify(db.prepare('SELECT * FROM user_movies ORDER BY user_id,movie_id').all())),bilingualBefore);
   check('bilingual titles across favorites/library/details/rate/search/watchlist at 375/1440; two-tab Ilya→Valeriy→Ilya; no UI writes or LLM calls');
+  }
+  await navigationAcceptance({ page, base, http, check, screenshot, until });
   assert.equal(errors.length,0,errors.join('\n'));report.mock_calls={openai:openaiCalls(),tmdb:calls('api.themoviedb.org')};report.status='passed';
 } catch(error) {
   report.status='failed';report.failure=error.message;

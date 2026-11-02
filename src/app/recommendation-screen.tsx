@@ -1,4 +1,6 @@
 'use client';
+import { detailUrl, readSession, writeSession, rememberPosition } from './navigation-state';
+import { useListPosition } from './use-list-position';
 import { profileFetch } from './profile-requests';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,7 +27,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 export default function RecommendationScreen() {
   const router = useRouter();
-  const [preferences, setPreferences] = useState<RecommendationPreferences>({ ...DEFAULT_PREFERENCES });
+  const [preferences, setPreferences] = useState<RecommendationPreferences>(() => { try { return parsePreferences(readSession('home-preferences', DEFAULT_PREFERENCES)); } catch { return { ...DEFAULT_PREFERENCES }; } });
+  useEffect(() => { writeSession('home-preferences', preferences); }, [preferences]);
   function changePreferences(patch: Partial<RecommendationPreferences>) { setPreferences(current => ({ ...current, ...patch })); }
   const [data, setData] = useState<State | null>(null), [initialLoading, setInitialLoading] = useState(true);
   const [generating, setGenerating] = useState(false), [acting, setActing] = useState(false);
@@ -44,6 +47,7 @@ export default function RecommendationScreen() {
     window.addEventListener('focus', visible); document.addEventListener('visibilitychange', visible);
     return () => { mounted.current = false; window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible); };
   }, [refresh]);
+  useListPosition('/', !initialLoading, 'home-movie-', 'home-results-title');
   const remoteRunning = (data?.generation.state === 'running' || data?.generation.state === 'busy_other');
   useEffect(() => {
     if (!remoteRunning && !generating) return;
@@ -85,7 +89,7 @@ export default function RecommendationScreen() {
   }
   function watch(movie: RecommendationMovie) {
     const local = data?.batch?.movies.find(row => row.tmdb_id === movie.tmdb_id);
-    if (local && !lock.current && !busy) router.push(`/rate?movie_id=${local.movie_id}`);
+    if (local && !lock.current && !busy) { rememberPosition('/', local.movie_id); router.push(detailUrl('/rate', local.movie_id, true)); }
   }
   const readinessMessage = data?.readiness.reason === 'configuration_missing' ? 'Для подбора нужно настроить OpenAI, модель и TMDB на сервере.' :
     data?.readiness.reason === 'ratings_missing' ? 'Для подбора нужны текущие оценки фильмов.' :

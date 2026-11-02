@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { useProfile } from './profile-provider';
+import { activeTab, tabUrl } from '../navigation-state';
 import { Icon } from './icons';
 
 const destinations = [
@@ -12,11 +14,12 @@ const destinations = [
 ] as const;
 
 export function Navigation() {
-  const pathname = usePathname();
+  useProfile();
+  const pathname = usePathname(), params = useSearchParams();
   return <nav className="navigation" aria-label="Основная навигация">
     {destinations.map(item => {
-      const active = item.href === '/' ? pathname === '/' || pathname.startsWith('/preview/') : pathname === item.href;
-      return <Link key={item.href} href={item.href} className={active ? 'nav-link active' : 'nav-link'} aria-current={active ? 'page' : undefined}>
+      const active = activeTab(pathname, params) === item.href;
+      return <Link key={item.href} href={tabUrl(item.href)} scroll={false} className={active ? 'nav-link active' : 'nav-link'} aria-current={active ? 'page' : undefined}>
         <Icon name={item.icon} /><span>{item.label}</span>
       </Link>;
     })}

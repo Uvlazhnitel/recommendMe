@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
+import Script from 'next/script';
 import { AppShell } from './components/app-shell';
 import './globals.css';
 
@@ -17,5 +18,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { themeColor: '#101113', colorScheme: 'dark' };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="ru" className={manrope.variable}><body><AppShell>{children}</AppShell></body></html>;
+  return <html lang="ru" className={manrope.variable}><body>
+    <Script id="navigation-history-guard" strategy="beforeInteractive">{`window.recommendmePopStateReady=true;window.addEventListener('popstate',function(event){window.recommendmePopState?.(event)},true);`}</Script>
+    <AppShell>{children}</AppShell></body></html>;
 }

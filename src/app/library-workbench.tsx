@@ -1,5 +1,7 @@
 'use client';
-import { profilePositionKey } from './profile-requests';
+import { rememberPosition, savedPosition } from './navigation-state';
+import { useAppNavigation } from './components/navigation-provider';
+import { useListPosition } from './use-list-position';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -12,28 +14,22 @@ import { useMovieEditor } from './use-movie-editor';
 import { useLibrary } from './use-library';
 import { defaultLibraryState, libraryScore, librarySorts, libraryUrl, parseLibraryState, type LibraryState } from './library-state';
 
-const positionKey = profilePositionKey;
-function remember(url: string, id?: number) {
-  try { sessionStorage.setItem(positionKey(url), JSON.stringify({ y: window.scrollY, id })); } catch { /* Browsing still works when storage is disabled. */ }
-}
-function remembered(url: string): { y: number; id?: number } | null {
-  try { const value = JSON.parse(sessionStorage.getItem(positionKey(url)) ?? 'null');
-    return value && Number.isFinite(value.y) && value.y >= 0 ? value : null;
-  } catch { return null; }
-}
+const remember = rememberPosition, remembered = savedPosition;
 export function LibraryWorkbench() {
+  const navigation = useAppNavigation();
   const router = useRouter(), params = useSearchParams(), raw = params.toString();
   const parsed = useMemo(() => parseLibraryState(new URLSearchParams(raw)), [raw]);
-  const { state, movieId, error: parameterError } = parsed, baseUrl = libraryUrl(state);
+  const { state, movieId, error: parameterError } = parsed, home = params.getAll('from').length === 1 && params.get('from') === 'home', baseUrl = home && movieId !== undefined ? '/' : libraryUrl(state);
   const collection = useLibrary(state, Boolean(parameterError), movieId, url => router.replace(url, { scroll: false }));
   const editor = useMovieEditor(parameterError ? undefined : movieId, collection.afterSave);
   const heading = useRef<HTMLHeadingElement>(null), results = useRef<HTMLHeadingElement>(null);
   const intent = useRef<'results' | 'restore' | null>(null), previousMovie = useRef(movieId);
   const [lastSelected, setLastSelected] = useState<number | undefined>();
-  const selectedId = editor.selected?.movie_id;
+  const selectedId = editor.selected?.movie_id, refresh = collection.refresh;
+  useListPosition(baseUrl, movieId === undefined && !collection.loading && !parameterError, 'library-movie-', 'library-results-heading');
 
   useEffect(() => {
-    if (previousMovie.current !== undefined && movieId === undefined) intent.current = 'restore';
+    if (previousMovie.current !== undefined && movieId === undefined) { intent.current = 'restore'; refresh(); }
     previousMovie.current = movieId;
     if (movieId !== undefined) return;
     if (collection.loading || parameterError) return;
@@ -49,19 +45,19 @@ export function LibraryWorkbench() {
       intent.current = null;
     });
     return () => cancelAnimationFrame(frame);
-  }, [baseUrl, movieId, collection.loading, parameterError]);
+  }, [baseUrl, movieId, collection.loading, parameterError, refresh]);
   useEffect(() => {
     if (movieId === undefined || editor.selecting || selectedId === undefined) return;
     heading.current?.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'instant' });
   }, [movieId, editor.selecting, selectedId]);
 
   function navigate(next: LibraryState) {
-    remember(baseUrl, lastSelected); intent.current = 'results'; router.push(libraryUrl(next), { scroll: false });
+    remember(baseUrl, lastSelected); intent.current = 'results'; navigation.push(libraryUrl(next));
   }
   function open(id: number) {
-    remember(baseUrl, id); setLastSelected(id); router.push(libraryUrl(state, id), { scroll: false });
+    remember(baseUrl, id); setLastSelected(id); navigation.push(libraryUrl(state, id));
   }
-  function back() { intent.current = 'restore'; router.push(baseUrl, { scroll: false }); }
+  function back() { intent.current = 'restore'; navigation.back(baseUrl); }
   const feedback = <>
     {editor.notice ? editor.notice.error ? <ErrorState>{editor.notice.text}</ErrorState> : <p className="success-state" role="status">{editor.notice.text}</p> : null}
     {editor.recoveryMovieId !== null ? <Button tone="quiet" type="button" disabled={editor.busy || editor.selecting} onClick={() => { void editor.choose(editor.recoveryMovieId!); collection.refresh(); }}>Перечитать фильм</Button> : null}
@@ -74,7 +70,7 @@ export function LibraryWorkbench() {
       {parameterError ? <ErrorState>{parameterError}<Link className="library-reset" href="/library">Вернуться к библиотеке без фильтров</Link></ErrorState> : <>
         {active ? <div className="library-active-filters"><span>{[state.q && `«${state.q}»`, state.year, state.rated === 'true' ? 'С оценкой' : state.rated === 'false' ? 'Без оценки' : null, state.sort !== 'added_desc' && librarySorts[state.sort]].filter(Boolean).join(' · ')}</span><Button tone="quiet" type="button" onClick={() => navigate({ ...defaultLibraryState })}>Сбросить</Button></div> : null}
         <section className="library-results" aria-label="Коллекция просмотренного" aria-busy={collection.loading}>
-          <div className="library-results-bar"><h2 ref={results} tabIndex={-1}>{collection.loading ? 'Загрузка коллекции…' : data ? `Найдено: ${data.total}` : 'Ваша коллекция'}</h2><Button tone="quiet" type="button" disabled={collection.loading} onClick={collection.refresh}>Обновить</Button></div>
+          <div className="library-results-bar"><h2 id="library-results-heading" ref={results} tabIndex={-1}>{collection.loading ? 'Загрузка коллекции…' : data ? `Найдено: ${data.total}` : 'Ваша коллекция'}</h2><Button tone="quiet" type="button" disabled={collection.loading} onClick={collection.refresh}>Обновить</Button></div>
           {collection.updated ? <p className="library-update-note" role="status">Список обновлён с учётом фильтров и сортировки. Оценка могла изменить положение фильма.</p> : null}
           {collection.loading ? <><LoadingState>Читаем вашу библиотеку…</LoadingState><div className="library-grid library-skeleton" aria-hidden="true">{Array.from({ length: 12 }, (_, i) => <div key={i}><span /><i /><i /></div>)}</div></> : collection.error ? <ErrorState>{collection.error}<Button tone="quiet" type="button" onClick={collection.refresh}>Повторить чтение</Button></ErrorState> : data ? <>
             {!data.items.length ? <EmptyState title={data.total > 0 ? 'Такой страницы нет' : !active ? 'Здесь будет ваша история кино' : state.rated === 'false' && !state.q && !state.year ? 'Все найденные фильмы уже оценены' : 'Ничего не найдено'}>
@@ -90,7 +86,7 @@ export function LibraryWorkbench() {
         </section>
       </>}
     </div>
-    {movieId !== undefined ? <div className="library-details"><Button className="library-back" tone="quiet" type="button" disabled={editor.busy} onClick={back}>← К моей библиотеке</Button>
+    {movieId !== undefined ? <div className="library-details"><Button className="library-back" tone="quiet" type="button" disabled={editor.busy} onClick={back}>{home ? '← К рекомендациям' : '← К моей библиотеке'}</Button>
       <MovieEditor model={editor} enhanced collection headingRef={heading} feedback={feedback} />
       {!editor.selected ? feedback : null}
     </div> : null}
